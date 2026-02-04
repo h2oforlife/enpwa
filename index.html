@@ -7,6 +7,58 @@
     <title>Reddit PWA</title>
     <link rel="manifest" href="./manifest.json">
     <style>
+        /* Update Notification Styles */
+        .update-notification {
+            position: fixed;
+            top: 60px; /* Below header */
+            left: 0;
+            right: 0;
+            background: #ff4500;
+            color: white;
+            padding: 12px 16px;
+            z-index: 1000;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            animation: slideDown 0.3s ease;
+        }
+
+        .update-notification .update-button {
+            background: white;
+            color: #ff4500;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .update-notification .update-button:hover {
+            background: #f0f0f0;
+        }
+
+        @keyframes slideDown {
+            from {
+                transform: translateY(-100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateY(-100%);
+                opacity: 0;
+            }
+        }
         * {
             margin: 0;
             padding: 0;
@@ -264,9 +316,15 @@
     </style>
 </head>
 <body>
-    <div class="overlay" id="overlay" onclick="toggleSidebar()"></div>
+<div class="overlay" id="overlay" onclick="toggleSidebar()"></div>
 
-    <div class="sidebar" id="sidebar">
+<!-- Update Notification -->
+<div class="update-notification" id="updateNotification" style="display: none;">
+    <span>A new version is available!</span>
+    <button class="update-button" onclick="updatePWA()">Update Now</button>
+</div>
+
+<div class="sidebar" id="sidebar">
         <div class="sidebar-header">
             Subreddits
             <button class="close-btn" onclick="toggleSidebar()">×</button>
@@ -295,6 +353,138 @@
     <script>
         let subreddits = JSON.parse(localStorage.getItem('subreddits') || '[]');
         let cachedPosts = JSON.parse(localStorage.getItem('cachedPosts') || '[]');
+        
+        // PWA Version Detection and Update Management
+        let updateCheckInterval;
+        const UPDATE_CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutes
+        
+        // Files to monitor for version changes
+        const VERSION_FILES = [
+            './index.html',
+            './sw.js',
+            './manifest.json',
+            './reddit-icon-192.png',
+            './reddit-icon-512.png'
+        ];
+        
+        // Generate hash of a file
+        async function generateFileHash(url) {
+            try {
+                const response = await fetch(url, { cache: 'no-cache' });
+                const text = await response.text();
+                // Simple hash function - in production, consider using SHA256
+                let hash = 0;
+                for (let i = 0; i < text.length; i++) {
+                    const char = text.charCodeAt(i);
+                    hash = ((hash << 5) - hash) + char;
+                    hash = hash & hash; // Convert to 32-bit integer
+                }
+                return Math.abs(hash).toString(36);
+            } catch (error) {
+                console.error('Error generating hash for', url, error);
+                return null;
+            }
+        }
+        
+        // Generate version hash from all monitored files
+        async function generateVersionHash() {
+            const hashes = [];
+            for (const file of VERSION_FILES) {
+                const hash = await generateFileHash(file);
+                if (hash) {
+                    hashes.push(hash);
+                }
+            }
+            return hashes.join('-');
+        }
+        
+        // Check for updates
+        async function checkForUpdates() {
+            if (!navigator.onLine) {
+                return; // Skip check if offline
+            }
+            
+            try {
+                const currentVersion = localStorage.getItem('pwa_version_hash');
+                const newVersion = await generateVersionHash();
+                
+                if (currentVersion && currentVersion !== newVersion) {
+                    // New version detected
+                    showUpdateNotification();
+                } else if (!currentVersion) {
+                    // First time, store current version
+                    localStorage.setItem('pwa_version_hash', newVersion);
+                }
+            } catch (error) {
+                console.error('Error checking for updates:', error);
+            }
+        }
+        
+        // Show update notification
+        function showUpdateNotification() {
+            const notification = document.getElementById('updateNotification');
+            notification.style.display = 'flex';
+        }
+        
+        // Hide update notification
+        function hideUpdateNotification() {
+            const notification = document.getElementById('updateNotification');
+            notification.style.display = 'none';
+        }
+        
+        // Update PWA - clear cache and reload
+        async function updatePWA() {
+            hideUpdateNotification();
+            
+            if (!navigator.serviceWorker.controller) {
+                console.log('No active service worker controller, reloading directly');
+                window.location.reload();
+                return;
+            }
+            
+            try {
+                // Request cache clearing from service worker
+                const messageChannel = new MessageChannel();
+                
+                messageChannel.port1.onmessage = (event) => {
+                    if (event.data.success) {
+                        console.log('PWA cache cleared successfully');
+                        // Update stored version hash
+                        localStorage.setItem('pwa_version_hash', '');
+                        // Reload page to fetch new version
+                        window.location.reload();
+                    } else {
+                        console.error('Failed to clear PWA cache:', event.data.error);
+                        alert('Failed to update. Please try again.');
+                    }
+                };
+                
+                navigator.serviceWorker.controller.postMessage({
+                    type: 'CLEAR_PWA_CACHE'
+                }, [messageChannel.port2]);
+                
+            } catch (error) {
+                console.error('Error updating PWA:', error);
+                alert('Failed to update. Please try again.');
+            }
+        }
+        
+        // Start periodic update checking
+        function startUpdateChecking() {
+            // Check immediately on load
+            checkForUpdates();
+            
+            // Set up periodic checking
+            updateCheckInterval = setInterval(checkForUpdates, UPDATE_CHECK_INTERVAL);
+        }
+        
+        // Stop periodic update checking
+        function stopUpdateChecking() {
+            if (updateCheckInterval) {
+                clearInterval(updateCheckInterval);
+                updateCheckInterval = null;
+            }
+        }
 
         function toggleSidebar() {
             const sidebar = document.getElementById('sidebar');
@@ -454,6 +644,11 @@
         // Auto-fetch on load if online
         if (navigator.onLine && subreddits.length > 0) {
             fetchPosts();
+        }
+        
+        // Start PWA update checking
+        if ('serviceWorker' in navigator) {
+            startUpdateChecking();
         }
     </script>
 </body>

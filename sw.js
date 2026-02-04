@@ -2,6 +2,22 @@ const CACHE_NAME = 'reddit-pwa-v3';
 const RUNTIME_CACHE_NAME = 'reddit-runtime-cache-v1'; // Separate cache for dynamic content
 const MAX_RUNTIME_ENTRIES = 10000; // Adjust based on expected usage and storage constraints
 
+// Message handler for selective cache clearing
+self.addEventListener('message', event => {
+  if (event.data.type === 'CLEAR_PWA_CACHE') {
+    // Clear only app shell cache
+    caches.delete(CACHE_NAME)
+      .then(() => {
+        console.log('SW: PWA cache cleared successfully');
+        event.ports[0].postMessage({ success: true });
+      })
+      .catch(error => {
+        console.error('SW: Failed to clear PWA cache:', error);
+        event.ports[0].postMessage({ success: false, error: error.message });
+      });
+  }
+});
+
 // Install event - cache the app shell immediately
 self.addEventListener('install', event => {
     console.log('SW: Installing...');
