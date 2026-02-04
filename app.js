@@ -110,6 +110,13 @@
         // Refresh posts
         document.getElementById('refreshPostsBtn').addEventListener('click', refreshPosts);
 
+        // Export/Import
+        document.getElementById('exportBtn').addEventListener('click', exportSubreddits);
+        document.getElementById('importBtn').addEventListener('click', () => {
+            document.getElementById('importFile').click();
+        });
+        document.getElementById('importFile').addEventListener('change', importSubreddits);
+
         // Update button
         document.getElementById('updateButton').addEventListener('click', updatePWA);
     }
@@ -209,9 +216,16 @@
 
     function updatePWA() {
         if (!navigator.serviceWorker.controller) {
+            // Save update timestamp
+            const now = new Date();
+            safeSetItem('lastUpdateTime', now.toISOString());
             window.location.reload();
             return;
         }
+
+        // Save update timestamp before reloading
+        const now = new Date();
+        safeSetItem('lastUpdateTime', now.toISOString());
 
         // Tell the service worker to skip waiting
         navigator.serviceWorker.controller.postMessage({ type: 'SKIP_WAITING' });
@@ -228,6 +242,7 @@
 
         if (sidebar.classList.contains('open')) {
             updateRateLimitStats();
+            updateVersionInfo();
         }
     }
 
@@ -590,6 +605,7 @@
     function updateAllDisplays() {
         updateRateLimitDisplay();
         updateRateLimitStats();
+        updateVersionInfo();
     }
 
     function updateRateLimitDisplay() {
@@ -626,6 +642,81 @@
                 Rate Limit: 1 request per ${CONFIG.REQUEST_INTERVAL / 1000} seconds
             </div>
         `;
+    }
+
+    function updateVersionInfo() {
+        const versionElement = document.getElementById('versionInfo');
+        if (!versionElement) return;
+
+        const lastUpdate = safeGetItem('lastUpdateTime', null);
+        
+        if (lastUpdate) {
+            const updateDate = new Date(lastUpdate);
+            const formattedDate = updateDate.toLocaleDateString('en-US', { 
+                month: 'short', 
+                day: 'numeric', 
+                year: 'numeric' 
+            });
+            const formattedTime = updateDate.toLocaleTimeString('en-US', { 
+                hour: '2-digit', 
+                minute: '2-digit'
+            });
+            
+            versionElement.innerHTML = `Last updated<br>${formattedDate} at ${formattedTime}`;
+        } else {
+            versionElement.innerHTML = 'No update history';
+        }
+    }
+
+    // ============================================================================
+    // EXPORT / IMPORT SUBREDDITS
+    // ============================================================================
+    function exportSubreddits() {
+        const data = {
+            subreddits: subreddits,
+            exportDate: new Date().toISOString()
+        };
+        
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `reddit-pwa-subreddits-${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    function importSubreddits(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const data = JSON.parse(e.target.result);
+                
+                if (!data.subreddits || !Array.isArray(data.subreddits)) {
+                    alert('Invalid file format');
+                    return;
+                }
+
+                // Merge with existing subreddits (avoid duplicates)
+                const merged = [...new Set([...subreddits, ...data.subreddits])];
+                subreddits = merged;
+                safeSetItem('subreddits', subreddits);
+                
+                renderSubreddits();
+                alert(`Imported ${data.subreddits.length} subreddits (${merged.length - subreddits.length} new)`);
+                
+                // Clear file input
+                event.target.value = '';
+            } catch (error) {
+                alert('Error reading file: ' + error.message);
+            }
+        };
+        reader.readAsText(file);
     }
 
     // ============================================================================

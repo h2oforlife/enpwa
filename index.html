@@ -145,6 +145,16 @@
             margin-bottom: 8px;
         }
 
+        .sidebar-content .button-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .sidebar-content .button-row button {
+            flex: 1;
+        }
+
         .sidebar-content button {
             background: #0079d3;
             color: white;
@@ -154,8 +164,6 @@
             cursor: pointer;
             font-size: 14px;
             font-weight: 700;
-            margin-right: 8px;
-            margin-bottom: 8px;
         }
 
         .sidebar-content button:hover {
@@ -349,9 +357,19 @@
         </div>
         <div class="sidebar-content">
             <input type="text" id="subredditInput" placeholder="Enter subreddit name" />
-            <button id="addSubredditBtn">Add Subreddit</button>
-            <button id="refreshPostsBtn">Refresh Posts</button>
+            <div class="button-row">
+                <button id="addSubredditBtn">Add Subreddit</button>
+                <button id="refreshPostsBtn">Refresh Posts</button>
+            </div>
             <div class="subreddit-list" id="subredditList"></div>
+            
+            <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
+                <div class="button-row">
+                    <button id="exportBtn">Export</button>
+                    <button id="importBtn">Import</button>
+                </div>
+                <input type="file" id="importFile" accept=".json" style="display: none;" />
+            </div>
             
             <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
                 <h3 style="font-size: 14px; margin-bottom: 10px;">Rate Limit Status</h3>
