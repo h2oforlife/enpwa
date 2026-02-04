@@ -27,6 +27,9 @@
             top: 0;
             z-index: 100;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
         }
 
         .header h1 {
@@ -34,15 +37,97 @@
             font-weight: 500;
         }
 
-        .subreddit-input {
-            background: white;
-            padding: 16px;
-            margin: 16px;
-            border-radius: 4px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
         }
 
-        .subreddit-input input {
+        .menu-btn {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 4px 8px;
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ccc;
+        }
+
+        .status-dot.online {
+            background: #4caf50;
+        }
+
+        .status-dot.offline {
+            background: #f44336;
+        }
+
+        .sidebar {
+            position: fixed;
+            left: -300px;
+            top: 0;
+            width: 300px;
+            height: 100vh;
+            background: white;
+            box-shadow: 2px 0 8px rgba(0,0,0,0.2);
+            transition: left 0.3s ease;
+            z-index: 200;
+            overflow-y: auto;
+        }
+
+        .sidebar.open {
+            left: 0;
+        }
+
+        .sidebar-header {
+            background: #ff4500;
+            color: white;
+            padding: 16px;
+            font-size: 18px;
+            font-weight: 500;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0;
+        }
+
+        .sidebar-content {
+            padding: 16px;
+        }
+
+        .overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 150;
+            display: none;
+        }
+
+        .overlay.active {
+            display: block;
+        }
+
+        .subreddit-list {
+            margin-top: 16px;
+        }
+
+        .sidebar-content input {
             width: 100%;
             padding: 8px 12px;
             border: 1px solid #ccc;
@@ -51,7 +136,7 @@
             margin-bottom: 8px;
         }
 
-        .subreddit-input button {
+        .sidebar-content button {
             background: #0079d3;
             color: white;
             border: none;
@@ -61,18 +146,11 @@
             font-size: 14px;
             font-weight: 700;
             margin-right: 8px;
+            margin-bottom: 8px;
         }
 
-        .subreddit-input button:hover {
+        .sidebar-content button:hover {
             background: #0060a8;
-        }
-
-        .subreddit-list {
-            background: white;
-            padding: 12px 16px;
-            margin: 0 16px 16px;
-            border-radius: 4px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         }
 
         .subreddit-tag {
@@ -183,32 +261,31 @@
             border-radius: 4px;
             border: 1px solid #ffeaa7;
         }
-
-        .sw-status {
-            background: #d4edda;
-            color: #155724;
-            padding: 8px 16px;
-            margin: 8px 16px;
-            border-radius: 4px;
-            font-size: 12px;
-            text-align: center;
-        }
     </style>
 </head>
 <body>
+    <div class="overlay" id="overlay" onclick="toggleSidebar()"></div>
+
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            Subreddits
+            <button class="close-btn" onclick="toggleSidebar()">×</button>
+        </div>
+        <div class="sidebar-content">
+            <input type="text" id="subredditInput" placeholder="Enter subreddit name" />
+            <button onclick="addSubreddit()">Add Subreddit</button>
+            <button onclick="refreshPosts()">Refresh Posts</button>
+            <div class="subreddit-list" id="subredditList"></div>
+        </div>
+    </div>
+
     <div class="header">
-        <h1>📱 Reddit PWA</h1>
+        <div class="header-left">
+            <button class="menu-btn" onclick="toggleSidebar()">☰</button>
+            <h1>Reddit PWA</h1>
+        </div>
+        <div class="status-dot" id="statusDot"></div>
     </div>
-
-    <div id="swStatus"></div>
-
-    <div class="subreddit-input">
-        <input type="text" id="subredditInput" placeholder="Enter subreddit name (e.g., programming)" />
-        <button onclick="addSubreddit()">Add Subreddit</button>
-        <button onclick="refreshPosts()">Refresh Posts</button>
-    </div>
-
-    <div class="subreddit-list" id="subredditList"></div>
 
     <div class="loading" id="loading">Loading posts...</div>
     <div class="status" id="status">Add subreddits to see posts</div>
@@ -219,19 +296,30 @@
         let subreddits = JSON.parse(localStorage.getItem('subreddits') || '[]');
         let cachedPosts = JSON.parse(localStorage.getItem('cachedPosts') || '[]');
 
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('overlay');
+            sidebar.classList.toggle('open');
+            overlay.classList.toggle('active');
+        }
+
+        function updateStatusDot() {
+            const dot = document.getElementById('statusDot');
+            if (navigator.serviceWorker.controller) {
+                dot.classList.add('online');
+            }
+        }
+
         // Register service worker with better error handling
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('./sw.js', { scope: './' })
                     .then(registration => {
                         console.log('Service Worker registered successfully:', registration.scope);
-                        document.getElementById('swStatus').innerHTML = 
-                            '<div class="sw-status">✅ Offline mode ready</div>';
+                        updateStatusDot();
                     })
                     .catch(error => {
                         console.error('Service Worker registration failed:', error);
-                        document.getElementById('swStatus').innerHTML = 
-                            '<div class="error">⚠️ Offline mode not available. Make sure you\'re serving via HTTP/HTTPS.</div>';
                     });
             });
         }
@@ -256,6 +344,7 @@
                 input.value = '';
                 renderSubreddits();
                 fetchPosts();
+                toggleSidebar();
             }
         }
 
