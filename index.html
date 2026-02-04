@@ -7,58 +7,6 @@
     <title>Reddit PWA</title>
     <link rel="manifest" href="./manifest.json">
     <style>
-        /* Update Notification Styles */
-        .update-notification {
-            position: fixed;
-            top: 60px; /* Below header */
-            left: 0;
-            right: 0;
-            background: #ff4500;
-            color: white;
-            padding: 12px 16px;
-            z-index: 1000;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            animation: slideDown 0.3s ease;
-        }
-
-        .update-notification .update-button {
-            background: white;
-            color: #ff4500;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-
-        .update-notification .update-button:hover {
-            background: #f0f0f0;
-        }
-
-        @keyframes slideDown {
-            from {
-                transform: translateY(-100%);
-                opacity: 0;
-            }
-            to {
-                transform: translateY(0);
-                opacity: 1;
-            }
-        }
-
-        @keyframes slideUp {
-            from {
-                transform: translateY(0);
-                opacity: 1;
-            }
-            to {
-                transform: translateY(-100%);
-                opacity: 0;
-            }
-        }
         * {
             margin: 0;
             padding: 0;
@@ -93,6 +41,15 @@
             display: flex;
             align-items: center;
             gap: 12px;
+        }
+
+        .rate-limit-info {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.8);
+            background: rgba(0, 0, 0, 0.2);
+            padding: 2px 6px;
+            border-radius: 10px;
+            margin-left: 8px;
         }
 
         .menu-btn {
@@ -205,6 +162,11 @@
             background: #0060a8;
         }
 
+        .sidebar-content button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
         .subreddit-tag {
             display: inline-block;
             background: #0079d3;
@@ -313,34 +275,94 @@
             border-radius: 4px;
             border: 1px solid #ffeaa7;
         }
+
+        .offline-banner {
+            position: fixed;
+            top: 48px;
+            left: 0;
+            right: 0;
+            background: #f44336;
+            color: white;
+            padding: 8px 16px;
+            text-align: center;
+            font-size: 14px;
+            z-index: 99;
+            display: none;
+        }
+
+        .offline-banner.active {
+            display: block;
+        }
+
+        .update-notification {
+            position: fixed;
+            top: 48px;
+            left: 0;
+            right: 0;
+            background: #ff4500;
+            color: white;
+            padding: 12px 16px;
+            z-index: 1000;
+            display: none;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .update-notification.active {
+            display: flex;
+        }
+
+        .update-notification .update-button {
+            background: white;
+            color: #ff4500;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .update-notification .update-button:hover {
+            background: #f0f0f0;
+        }
     </style>
 </head>
 <body>
-<div class="overlay" id="overlay" onclick="toggleSidebar()"></div>
+    <div class="overlay" id="overlay"></div>
 
-<!-- Update Notification -->
-<div class="update-notification" id="updateNotification" style="display: none;">
-    <span>A new version is available!</span>
-    <button class="update-button" onclick="updatePWA()">Update Now</button>
-</div>
+    <div class="offline-banner" id="offlineBanner">
+        You are offline. Showing cached posts.
+    </div>
 
-<div class="sidebar" id="sidebar">
+    <div class="update-notification" id="updateNotification">
+        <span>A new version is available!</span>
+        <button class="update-button" id="updateButton">Update Now</button>
+    </div>
+
+    <div class="sidebar" id="sidebar">
         <div class="sidebar-header">
             Subreddits
-            <button class="close-btn" onclick="toggleSidebar()">×</button>
+            <button class="close-btn" id="closeSidebar">×</button>
         </div>
         <div class="sidebar-content">
             <input type="text" id="subredditInput" placeholder="Enter subreddit name" />
-            <button onclick="addSubreddit()">Add Subreddit</button>
-            <button onclick="refreshPosts()">Refresh Posts</button>
+            <button id="addSubredditBtn">Add Subreddit</button>
+            <button id="refreshPostsBtn">Refresh Posts</button>
             <div class="subreddit-list" id="subredditList"></div>
+            
+            <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
+                <h3 style="font-size: 14px; margin-bottom: 10px;">Rate Limit Status</h3>
+                <div id="rateLimitStats" style="font-size: 12px; color: #666;"></div>
+            </div>
         </div>
     </div>
 
     <div class="header">
         <div class="header-left">
-            <button class="menu-btn" onclick="toggleSidebar()">☰</button>
+            <button class="menu-btn" id="menuBtn">☰</button>
             <h1>Reddit PWA</h1>
+            <span class="rate-limit-info" id="rateLimitInfo"></span>
         </div>
         <div class="status-dot" id="statusDot"></div>
     </div>
@@ -350,306 +372,6 @@
 
     <div id="posts"></div>
 
-    <script>
-        let subreddits = JSON.parse(localStorage.getItem('subreddits') || '[]');
-        let cachedPosts = JSON.parse(localStorage.getItem('cachedPosts') || '[]');
-        
-        // PWA Version Detection and Update Management
-        let updateCheckInterval;
-        const UPDATE_CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutes
-        
-        // Files to monitor for version changes
-        const VERSION_FILES = [
-            './index.html',
-            './sw.js',
-            './manifest.json',
-            './reddit-icon-192.png',
-            './reddit-icon-512.png'
-        ];
-        
-        // Generate hash of a file
-        async function generateFileHash(url) {
-            try {
-                const response = await fetch(url, { cache: 'no-cache' });
-                const text = await response.text();
-                // Simple hash function - in production, consider using SHA256
-                let hash = 0;
-                for (let i = 0; i < text.length; i++) {
-                    const char = text.charCodeAt(i);
-                    hash = ((hash << 5) - hash) + char;
-                    hash = hash & hash; // Convert to 32-bit integer
-                }
-                return Math.abs(hash).toString(36);
-            } catch (error) {
-                console.error('Error generating hash for', url, error);
-                return null;
-            }
-        }
-        
-        // Generate version hash from all monitored files
-        async function generateVersionHash() {
-            const hashes = [];
-            for (const file of VERSION_FILES) {
-                const hash = await generateFileHash(file);
-                if (hash) {
-                    hashes.push(hash);
-                }
-            }
-            return hashes.join('-');
-        }
-        
-        // Check for updates
-        async function checkForUpdates() {
-            if (!navigator.onLine) {
-                return; // Skip check if offline
-            }
-            
-            try {
-                const currentVersion = localStorage.getItem('pwa_version_hash');
-                const newVersion = await generateVersionHash();
-                
-                if (currentVersion && currentVersion !== newVersion) {
-                    // New version detected
-                    showUpdateNotification();
-                } else if (!currentVersion) {
-                    // First time, store current version
-                    localStorage.setItem('pwa_version_hash', newVersion);
-                }
-            } catch (error) {
-                console.error('Error checking for updates:', error);
-            }
-        }
-        
-        // Show update notification
-        function showUpdateNotification() {
-            const notification = document.getElementById('updateNotification');
-            notification.style.display = 'flex';
-        }
-        
-        // Hide update notification
-        function hideUpdateNotification() {
-            const notification = document.getElementById('updateNotification');
-            notification.style.display = 'none';
-        }
-        
-        // Update PWA - clear cache and reload
-        async function updatePWA() {
-            hideUpdateNotification();
-            
-            if (!navigator.serviceWorker.controller) {
-                console.log('No active service worker controller, reloading directly');
-                window.location.reload();
-                return;
-            }
-            
-            try {
-                // Request cache clearing from service worker
-                const messageChannel = new MessageChannel();
-                
-                messageChannel.port1.onmessage = (event) => {
-                    if (event.data.success) {
-                        console.log('PWA cache cleared successfully');
-                        // Update stored version hash
-                        localStorage.setItem('pwa_version_hash', '');
-                        // Reload page to fetch new version
-                        window.location.reload();
-                    } else {
-                        console.error('Failed to clear PWA cache:', event.data.error);
-                        alert('Failed to update. Please try again.');
-                    }
-                };
-                
-                navigator.serviceWorker.controller.postMessage({
-                    type: 'CLEAR_PWA_CACHE'
-                }, [messageChannel.port2]);
-                
-            } catch (error) {
-                console.error('Error updating PWA:', error);
-                alert('Failed to update. Please try again.');
-            }
-        }
-        
-        // Start periodic update checking
-        function startUpdateChecking() {
-            // Check immediately on load
-            checkForUpdates();
-            
-            // Set up periodic checking
-            updateCheckInterval = setInterval(checkForUpdates, UPDATE_CHECK_INTERVAL);
-        }
-        
-        // Stop periodic update checking
-        function stopUpdateChecking() {
-            if (updateCheckInterval) {
-                clearInterval(updateCheckInterval);
-                updateCheckInterval = null;
-            }
-        }
-
-        function toggleSidebar() {
-            const sidebar = document.getElementById('sidebar');
-            const overlay = document.getElementById('overlay');
-            sidebar.classList.toggle('open');
-            overlay.classList.toggle('active');
-        }
-
-        function updateStatusDot() {
-            const dot = document.getElementById('statusDot');
-            if (navigator.serviceWorker.controller) {
-                dot.classList.add('online');
-            }
-        }
-
-        // Register service worker with better error handling
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js', { scope: './' })
-                    .then(registration => {
-                        console.log('Service Worker registered successfully:', registration.scope);
-                        updateStatusDot();
-                    })
-                    .catch(error => {
-                        console.error('Service Worker registration failed:', error);
-                    });
-            });
-        }
-
-        function renderSubreddits() {
-            const list = document.getElementById('subredditList');
-            if (subreddits.length === 0) {
-                list.innerHTML = '<span style="color: #7c7c7c;">No subreddits added yet</span>';
-                return;
-            }
-            list.innerHTML = subreddits.map(sub => 
-                `<span class="subreddit-tag" onclick="removeSubreddit('${sub}')">r/${sub} ×</span>`
-            ).join('');
-        }
-
-        function addSubreddit() {
-            const input = document.getElementById('subredditInput');
-            const sub = input.value.trim().replace(/^r\//, '');
-            if (sub && !subreddits.includes(sub)) {
-                subreddits.push(sub);
-                localStorage.setItem('subreddits', JSON.stringify(subreddits));
-                input.value = '';
-                renderSubreddits();
-                fetchPosts();
-                toggleSidebar();
-            }
-        }
-
-        function removeSubreddit(sub) {
-            subreddits = subreddits.filter(s => s !== sub);
-            localStorage.setItem('subreddits', JSON.stringify(subreddits));
-            renderSubreddits();
-            renderPosts();
-        }
-
-        async function fetchPosts() {
-            if (subreddits.length === 0) return;
-
-            document.getElementById('loading').classList.add('active');
-            document.getElementById('status').textContent = '';
-
-            const allPosts = [];
-
-            for (const sub of subreddits) {
-                try {
-                    const response = await fetch(`https://www.reddit.com/r/${sub}.json?limit=10`);
-                    const data = await response.json();
-                    const posts = data.data.children.map(child => child.data);
-                    allPosts.push(...posts);
-                } catch (error) {
-                    console.error(`Error fetching r/${sub}:`, error);
-                }
-            }
-
-            if (allPosts.length > 0) {
-                // Sort posts by age (newest first)
-                cachedPosts = allPosts.sort((a, b) => b.created_utc - a.created_utc);
-                localStorage.setItem('cachedPosts', JSON.stringify(cachedPosts));
-            }
-
-            document.getElementById('loading').classList.remove('active');
-            renderPosts();
-        }
-
-        function renderPosts() {
-            const container = document.getElementById('posts');
-            const status = document.getElementById('status');
-
-            if (cachedPosts.length === 0) {
-                container.innerHTML = '';
-                status.textContent = navigator.onLine ? 
-                    'No posts yet. Click "Refresh Posts" to load.' : 
-                    'No cached posts available. Connect to internet and refresh.';
-                return;
-            }
-
-            status.textContent = '';
-            container.innerHTML = cachedPosts.map(post => {
-                const imageHtml = post.preview?.images?.[0]?.source?.url ? 
-                    `<img class="post-image" src="${post.preview.images[0].source.url.replace(/&amp;/g, '&')}" alt="" />` : '';
-                
-                const selftext = post.selftext ? 
-                    `<div class="post-text">${post.selftext.substring(0, 300)}${post.selftext.length > 300 ? '...' : ''}</div>` : '';
-
-                return `
-                    <div class="post">
-                        <div class="post-header">
-                            <span class="subreddit-name">r/${post.subreddit}</span>
-                            • Posted by <span class="post-author">u/${post.author}</span>
-                            • ${formatTime(post.created_utc)}
-                        </div>
-                        <div class="post-title">
-                            <a href="https://reddit.com${post.permalink}" target="_blank">${post.title}</a>
-                        </div>
-                        ${imageHtml}
-                        ${selftext}
-                        <div class="post-footer">
-                            <span class="post-stat">⬆ ${formatNumber(post.ups)} upvotes</span>
-                            <span class="post-stat">💬 ${formatNumber(post.num_comments)} comments</span>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-        }
-
-        function formatTime(timestamp) {
-            const now = Date.now() / 1000;
-            const diff = now - timestamp;
-            
-            if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-            if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-            return `${Math.floor(diff / 86400)}d ago`;
-        }
-
-        function formatNumber(num) {
-            if (num >= 1000) return `${(num / 1000).toFixed(1)}k`;
-            return num;
-        }
-
-        function refreshPosts() {
-            if (!navigator.onLine) {
-                alert('You are offline. Showing cached posts.');
-                return;
-            }
-            fetchPosts();
-        }
-
-        // Initial render
-        renderSubreddits();
-        renderPosts();
-
-        // Auto-fetch on load if online
-        if (navigator.onLine && subreddits.length > 0) {
-            fetchPosts();
-        }
-        
-        // Start PWA update checking
-        if ('serviceWorker' in navigator) {
-            startUpdateChecking();
-        }
-    </script>
+    <script src="./app.js"></script>
 </body>
 </html>

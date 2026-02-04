@@ -1,188 +1,213 @@
-const CACHE_NAME = 'reddit-pwa-v3';
-const RUNTIME_CACHE_NAME = 'reddit-runtime-cache-v1'; // Separate cache for dynamic content
-const MAX_RUNTIME_ENTRIES = 10000; // Adjust based on expected usage and storage constraints
+// Reddit PWA Service Worker
+// Version: 1.0.0
 
-// Message handler for selective cache clearing
-self.addEventListener('message', event => {
-  if (event.data.type === 'CLEAR_PWA_CACHE') {
-    // Clear only app shell cache
-    caches.delete(CACHE_NAME)
-      .then(() => {
-        console.log('SW: PWA cache cleared successfully');
-        event.ports[0].postMessage({ success: true });
-      })
-      .catch(error => {
-        console.error('SW: Failed to clear PWA cache:', error);
-        event.ports[0].postMessage({ success: false, error: error.message });
-      });
-  }
-});
+const CACHE_VERSION = 'reddit-pwa-v1.0.0';
+const CACHE_NAME = `app-shell-${CACHE_VERSION}`;
+const RUNTIME_CACHE = `runtime-${CACHE_VERSION}`;
 
-// Install event - cache the app shell immediately
+// Files to cache for offline functionality
+const APP_SHELL_FILES = [
+    './',
+    './index.html',
+    './app.js',
+    './manifest.json',
+    './reddit-icon-192.png',
+    './reddit-icon-512.png'
+];
+
+const MAX_RUNTIME_CACHE_SIZE = 100; // Maximum number of runtime cache entries
+
+// ============================================================================
+// INSTALL EVENT - Cache app shell
+// ============================================================================
 self.addEventListener('install', event => {
-    console.log('SW: Installing...');
     event.waitUntil(
         caches.open(CACHE_NAME)
             .then(cache => {
-                console.log('SW: Caching app shell');
-                // Make sure index.html path is correct relative to your server root
-                return cache.addAll([
-                    './', // Usually resolves to index.html
-                    './index.html', // Explicitly add index.html
-                    './reddit-icon-192.png',
-                    './reddit-icon-512.png',
-                    './manifest.json',
-                    './sw.js'
-                    // Add other critical static assets (CSS, base JS) here if needed
-                ]);
+                return cache.addAll(APP_SHELL_FILES);
             })
             .then(() => {
-                console.log('SW: Skip waiting');
+                // Force the waiting service worker to become the active service worker
                 return self.skipWaiting();
             })
             .catch(error => {
-                console.error('SW: Install failed:', error);
-                throw error; // Propagate error if critical
+                console.error('Service Worker installation failed:', error);
             })
     );
 });
 
-// Activate event - take control immediately
+// ============================================================================
+// ACTIVATE EVENT - Clean up old caches
+// ============================================================================
 self.addEventListener('activate', event => {
-    console.log('SW: Activating...');
     event.waitUntil(
         caches.keys()
             .then(cacheNames => {
                 return Promise.all(
                     cacheNames.map(cacheName => {
-                        if (cacheName !== CACHE_NAME && cacheName !== RUNTIME_CACHE_NAME) {
-                            console.log('SW: Deleting old cache:', cacheName);
+                        // Delete old caches
+                        if (cacheName !== CACHE_NAME && cacheName !== RUNTIME_CACHE) {
                             return caches.delete(cacheName);
                         }
-                        // Consider deleting older runtime cache versions if you change the name scheme
-                        // e.g., if cacheName.startsWith('reddit-runtime-cache-') && cacheName !== RUNTIME_CACHE_NAME
                     })
                 );
             })
             .then(() => {
-                console.log('SW: Claiming clients');
+                // Take control of all clients immediately
                 return self.clients.claim();
-            })
-            .catch(error => {
-                 console.error('SW: Activation failed:', error);
             })
     );
 });
 
-// Helper function to maintain cache size
+// ============================================================================
+// FETCH EVENT - Serve from cache, fallback to network
+// ============================================================================
+self.addEventListener('fetch', event => {
+    const { request } = event;
+    const url = new URL(request.url);
+
+    // Skip chrome-extension and other non-http(s) requests
+    if (!request.url.startsWith('http')) {
+        return;
+    }
+
+    // For navigation requests (HTML pages)
+    if (request.mode === 'navigate') {
+        event.respondWith(
+            caches.match('./index.html')
+                .then(response => {
+                    return response || fetch(request);
+                })
+                .catch(() => {
+                    return caches.match('./index.html');
+                })
+        );
+        return;
+    }
+
+    // For app shell files - cache first
+    if (APP_SHELL_FILES.some(file => request.url.endsWith(file))) {
+        event.respondWith(
+            caches.match(request)
+                .then(response => {
+                    return response || fetch(request).then(fetchResponse => {
+                        return caches.open(CACHE_NAME).then(cache => {
+                            cache.put(request, fetchResponse.clone());
+                            return fetchResponse;
+                        });
+                    });
+                })
+        );
+        return;
+    }
+
+    // For Reddit API requests - network first, cache fallback
+    if (url.hostname.includes('reddit.com')) {
+        event.respondWith(
+            fetch(request)
+                .then(response => {
+                    // Only cache successful responses
+                    if (response && response.status === 200) {
+                        const responseClone = response.clone();
+                        caches.open(RUNTIME_CACHE).then(cache => {
+                            cache.put(request, responseClone);
+                            trimCache(RUNTIME_CACHE, MAX_RUNTIME_CACHE_SIZE);
+                        });
+                    }
+                    return response;
+                })
+                .catch(() => {
+                    // Network failed, try cache
+                    return caches.match(request);
+                })
+        );
+        return;
+    }
+
+    // For images - cache first with network fallback
+    if (request.destination === 'image') {
+        event.respondWith(
+            caches.match(request)
+                .then(response => {
+                    if (response) {
+                        return response;
+                    }
+                    return fetch(request).then(fetchResponse => {
+                        if (fetchResponse && fetchResponse.status === 200) {
+                            const responseClone = fetchResponse.clone();
+                            caches.open(RUNTIME_CACHE).then(cache => {
+                                cache.put(request, responseClone);
+                                trimCache(RUNTIME_CACHE, MAX_RUNTIME_CACHE_SIZE);
+                            });
+                        }
+                        return fetchResponse;
+                    });
+                })
+        );
+        return;
+    }
+
+    // For everything else - network first, cache fallback
+    event.respondWith(
+        fetch(request)
+            .then(response => {
+                return response;
+            })
+            .catch(() => {
+                return caches.match(request);
+            })
+    );
+});
+
+// ============================================================================
+// MESSAGE EVENT - Handle messages from clients
+// ============================================================================
+self.addEventListener('message', event => {
+    if (event.data.type === 'SKIP_WAITING') {
+        self.skipWaiting();
+    }
+
+    if (event.data.type === 'CLEAR_PWA_CACHE') {
+        Promise.all([
+            caches.delete(CACHE_NAME),
+            caches.delete(RUNTIME_CACHE)
+        ])
+            .then(() => {
+                if (event.ports && event.ports[0]) {
+                    event.ports[0].postMessage({ success: true });
+                }
+            })
+            .catch(error => {
+                if (event.ports && event.ports[0]) {
+                    event.ports[0].postMessage({ success: false, error: error.message });
+                }
+            });
+    }
+});
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Trim cache to maximum number of entries
+ * @param {string} cacheName - Name of the cache to trim
+ * @param {number} maxItems - Maximum number of items to keep
+ */
 function trimCache(cacheName, maxItems) {
     caches.open(cacheName)
         .then(cache => {
-            return cache.keys();
-        })
-        .then(requests => {
-            if (requests.length > maxItems) {
-                // Delete oldest entries first (assuming keys() returns them in insertion order)
-                const deletePromises = [];
-                for (let i = 0; i < requests.length - maxItems; i++) {
-                    console.log(`SW: Evicting old item from ${cacheName}:`, requests[i].url);
-                    deletePromises.push(cache.delete(requests[i]));
+            return cache.keys().then(keys => {
+                if (keys.length > maxItems) {
+                    // Delete oldest entries (first items in the array)
+                    const deletePromises = keys
+                        .slice(0, keys.length - maxItems)
+                        .map(key => cache.delete(key));
+                    return Promise.all(deletePromises);
                 }
-                return Promise.all(deletePromises);
-            }
+            });
         })
         .catch(error => {
-             console.error('SW: Error trimming cache:', cacheName, error);
+            console.error('Error trimming cache:', error);
         });
 }
-
-
-// Fetch event - cache first for app shell, network first with cache fallback for API/data, cache first for images
-self.addEventListener('fetch', event => {
-    const url = new URL(event.request.url);
-
-    // For navigation requests (page loads) - App Shell model
-    if (event.request.mode === 'navigate') {
-        event.respondWith(
-            caches.match('./index.html') // Match against the cached shell
-                .then(response => {
-                    return response || fetch(event.request); // Fallback to network if shell missing (shouldn't happen after install)
-                })
-                .catch(() => {
-                     // Very unlikely, only if cache is corrupted/missing
-                     console.error("SW: Could not load app shell.");
-                     // Return a minimal fallback page if possible
-                     // Or just re-throw? Up to design.
-                     return caches.match('./index.html'); 
-                })
-        );
-        return; // Important to return after handling navigate
-    }
-
-    // For Reddit API requests
-    if (url.hostname.includes('reddit.com')) {
-        event.respondWith(
-            caches.open(RUNTIME_CACHE_NAME) // Use the dedicated runtime cache
-                .then(cache => {
-                     return fetch(event.request)
-                         .then(response => {
-                             // Clone the response before putting it in cache
-                             if (response && response.status === 200) {
-                                 const responseClone = response.clone();
-                                 cache.put(event.request, responseClone);
-                                 // Trim cache after adding new item
-                                 trimCache(RUNTIME_CACHE_NAME, MAX_RUNTIME_ENTRIES);
-                             }
-                             return response;
-                         })
-                         .catch(() => {
-                             // Network failed, try cache
-                             console.log("SW: Network failed, serving from cache for:", event.request.url);
-                             return cache.match(event.request);
-                         });
-                })
-        );
-        return; // Important to return after handling API
-    }
-
-    // For images
-    if (event.request.destination === 'image') {
-         event.respondWith(
-            caches.open(RUNTIME_CACHE_NAME) // Use the same runtime cache for images
-                .then(cache => {
-                    return cache.match(event.request)
-                        .then(cachedResponse => {
-                            if (cachedResponse) {
-                                console.log("SW: Serving image from cache:", event.request.url);
-                                return cachedResponse;
-                            }
-                            // Not in cache, fetch from network
-                            return fetch(event.request)
-                                .then(response => {
-                                    if (response && response.status === 200) {
-                                        const responseClone = response.clone();
-                                        cache.put(event.request, responseClone);
-                                         // Trim cache after adding new item
-                                        trimCache(RUNTIME_CACHE_NAME, MAX_RUNTIME_ENTRIES);
-                                    }
-                                    return response;
-                                })
-                                .catch(() => {
-                                    // Network failed, no cache available
-                                     console.log("SW: Could not fetch or serve image from cache:", event.request.url);
-                                     // Return a placeholder image if desired, otherwise return the failed response
-                                     // return caches.match('/path/to/placeholder.jpg');
-                                     return response; // This will be the failed response
-                                });
-                        });
-                })
-        );
-        return; // Important to return after handling image
-    }
-
-    // For everything else (e.g., static assets like CSS/JS not in app shell), try cache first
-    event.respondWith(
-        caches.match(event.request)
-            .then(response => response || fetch(event.request))
-    );
-});
