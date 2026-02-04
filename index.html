@@ -375,7 +375,8 @@
             }
 
             if (allPosts.length > 0) {
-                cachedPosts = allPosts;
+                // Sort posts by age (newest first)
+                cachedPosts = allPosts.sort((a, b) => b.created_utc - a.created_utc);
                 localStorage.setItem('cachedPosts', JSON.stringify(cachedPosts));
             }
 
