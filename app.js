@@ -1,5 +1,4 @@
 // Reddit PWA - Main Application Logic
-// Version: 1.0.0
 
 (function() {
     'use strict';
