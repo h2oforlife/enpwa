@@ -235,12 +235,27 @@
             display: block;
         }
 
+        .post-image video {
+            width: 100%;
+            display: block;
+        }
+
         .post-text {
             padding: 0 12px 12px;
             font-size: 14px;
             line-height: 21px;
             max-height: 200px;
             overflow: hidden;
+        }
+
+        .post-text a {
+            color: #0079d3;
+            text-decoration: none;
+            word-break: break-all;
+        }
+
+        .post-text a:hover {
+            text-decoration: underline;
         }
 
         .post-footer {
@@ -263,16 +278,6 @@
             padding: 20px;
             color: #7c7c7c;
             font-size: 14px;
-        }
-
-        .loading {
-            display: none;
-            text-align: center;
-            padding: 20px;
-        }
-
-        .loading.active {
-            display: block;
         }
 
         .error {
@@ -391,7 +396,6 @@
         <div class="status-dot" id="statusDot"></div>
     </div>
 
-    <div class="loading" id="loading">Loading posts...</div>
     <div class="status" id="status">Add subreddits to see posts</div>
 
     <div id="posts"></div>

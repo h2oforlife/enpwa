@@ -425,10 +425,7 @@
             return;
         }
 
-        const loading = document.getElementById('loading');
         const status = document.getElementById('status');
-        
-        loading.classList.add('active');
         status.textContent = 'Fetching posts...';
 
         const errors = [];
@@ -452,8 +449,6 @@
                 errors.push(`r/${sub}: ${error.message}`);
             }
         }
-
-        loading.classList.remove('active');
         
         if (errors.length > 0) {
             status.textContent = 'Some subreddits failed to load. Check console for details.';
@@ -476,7 +471,7 @@
 
     function stripPostData(post) {
         // Keep only essential fields to save storage space
-        return {
+        const result = {
             id: post.id,
             title: post.title,
             author: post.author,
@@ -486,6 +481,8 @@
             ups: post.ups,
             num_comments: post.num_comments,
             selftext: post.selftext ? post.selftext.substring(0, 500) : '', // Limit selftext
+            url: post.url || '', // External link or media URL
+            is_video: post.is_video || false,
             preview: post.preview?.images?.[0]?.source?.url ? {
                 images: [{
                     source: {
@@ -494,6 +491,13 @@
                 }]
             } : null
         };
+
+        // Add video URL if it's a video post
+        if (post.is_video && post.media?.reddit_video?.fallback_url) {
+            result.video_url = post.media.reddit_video.fallback_url;
+        }
+
+        return result;
     }
 
     function updateLoadingStatus(message) {
@@ -515,10 +519,7 @@
             return;
         }
 
-        const loading = document.getElementById('loading');
         const status = document.getElementById('status');
-        
-        loading.classList.add('active');
         status.textContent = `Fetching posts from r/${subreddit}...`;
 
         try {
@@ -538,7 +539,6 @@
             console.error(error);
         }
 
-        loading.classList.remove('active');
         renderPosts();
     }
 
@@ -588,6 +588,12 @@
     }
 
     function getImageHTML(post) {
+        // Handle video posts
+        if (post.is_video && post.video_url) {
+            return `<video class="post-image" controls><source src="${escapeHTML(post.video_url)}" type="video/mp4">Your browser does not support video.</video>`;
+        }
+
+        // Handle image posts
         if (!post.preview || !post.preview.images || !post.preview.images[0]) {
             return '';
         }
@@ -602,7 +608,17 @@
         }
 
         const truncated = post.selftext.substring(0, 300);
-        const text = escapeHTML(truncated) + (post.selftext.length > 300 ? '...' : '');
+        let text = escapeHTML(truncated);
+        
+        // Parse markdown-style links: [text](url) or just [url](url)
+        text = text.replace(/\[\s*(https?:\/\/[^\]]+)\s*\]\s*\(\s*(https?:\/\/[^\)]+)\s*\)/g, 
+            '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+        
+        // Parse bare URLs in text
+        text = text.replace(/(https?:\/\/[^\s<]+)/g, 
+            '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+        
+        text += (post.selftext.length > 300 ? '...' : '');
         return `<div class="post-text">${text}</div>`;
     }
 
