@@ -22,6 +22,8 @@
     // ============================================================================
     let subreddits = [];
     let cachedPosts = [];
+    let popularPosts = [];
+    let currentFeed = 'my'; // 'my' or 'popular'
     let rateLimitState = {
         lastRequestTime: 0,
         remainingRequests: CONFIG.REQUESTS_PER_MINUTE,
@@ -64,6 +66,7 @@
         // Load data from localStorage
         subreddits = safeGetItem('subreddits', []);
         cachedPosts = safeGetItem('cachedPosts', []);
+        popularPosts = safeGetItem('popularPosts', []);
         const savedRateLimitState = safeGetItem('rateLimitState', null);
         
         if (savedRateLimitState) {
@@ -78,6 +81,9 @@
 
         // Register service worker
         registerServiceWorker();
+
+        // Show feed tabs if user has subreddits
+        updateFeedTabsVisibility();
 
         // Show welcome screen if no subreddits, otherwise render
         if (subreddits.length === 0) {
@@ -148,6 +154,12 @@
         const addDefaults = document.getElementById('addDefaults');
         if (skipWelcome) skipWelcome.addEventListener('click', hideWelcomeScreen);
         if (addDefaults) addDefaults.addEventListener('click', addDefaultSubreddits);
+
+        // Feed tabs
+        const myFeedTab = document.getElementById('myFeedTab');
+        const popularFeedTab = document.getElementById('popularFeedTab');
+        if (myFeedTab) myFeedTab.addEventListener('click', () => switchFeed('my'));
+        if (popularFeedTab) popularFeedTab.addEventListener('click', () => switchFeed('popular'));
     }
 
     // ============================================================================
@@ -258,6 +270,11 @@
 
         // Tell the service worker to skip waiting
         navigator.serviceWorker.controller.postMessage({ type: 'SKIP_WAITING' });
+        
+        // Force reload after a short delay to ensure SW activated
+        setTimeout(() => {
+            window.location.reload();
+        }, 100);
     }
 
     // ============================================================================
@@ -271,6 +288,67 @@
 
         if (sidebar.classList.contains('open')) {
             updateVersionInfo();
+        }
+    }
+
+    // ============================================================================
+    // FEED SWITCHING
+    // ============================================================================
+    function updateFeedTabsVisibility() {
+        const feedTabs = document.getElementById('feedTabs');
+        if (feedTabs) {
+            feedTabs.style.display = subreddits.length > 0 ? 'flex' : 'none';
+        }
+    }
+
+    function switchFeed(feed) {
+        currentFeed = feed;
+
+        // Update tab active states
+        const myFeedTab = document.getElementById('myFeedTab');
+        const popularFeedTab = document.getElementById('popularFeedTab');
+
+        if (myFeedTab && popularFeedTab) {
+            if (feed === 'my') {
+                myFeedTab.classList.add('active');
+                popularFeedTab.classList.remove('active');
+            } else {
+                myFeedTab.classList.remove('active');
+                popularFeedTab.classList.add('active');
+            }
+        }
+
+        // Render appropriate posts
+        renderPosts();
+
+        // If switching to popular and no posts, fetch them
+        if (feed === 'popular' && popularPosts.length === 0) {
+            fetchPopularPosts();
+        }
+    }
+
+    async function fetchPopularPosts() {
+        if (!navigator.onLine) {
+            alert('You are offline. Cannot fetch popular posts.');
+            return;
+        }
+
+        const status = document.getElementById('status');
+        status.textContent = 'Fetching popular posts...';
+
+        try {
+            const posts = await fetchSubredditPosts('popular');
+            
+            if (posts.length > 0) {
+                popularPosts = posts.sort((a, b) => b.created_utc - a.created_utc);
+                safeSetItem('popularPosts', popularPosts);
+                renderPosts();
+            }
+            
+            status.textContent = '';
+        } catch (error) {
+            status.textContent = `Failed to fetch popular posts: ${error.message}`;
+            console.error(error);
         }
     }
 
@@ -563,16 +641,24 @@
         const container = document.getElementById('posts');
         const status = document.getElementById('status');
 
-        if (cachedPosts.length === 0) {
+        const postsToShow = currentFeed === 'my' ? cachedPosts : popularPosts;
+
+        if (postsToShow.length === 0) {
             container.innerHTML = '';
-            status.textContent = navigator.onLine ? 
-                'No posts yet. Add subreddits and click "Refresh Posts".' : 
-                'No cached posts available. Connect to internet and refresh.';
+            if (currentFeed === 'my') {
+                status.textContent = navigator.onLine ? 
+                    'No posts yet. Add subreddits and click "Refresh Posts".' : 
+                    'No cached posts available. Connect to internet and refresh.';
+            } else {
+                status.textContent = navigator.onLine ? 
+                    'No popular posts yet. They will load automatically.' : 
+                    'No cached popular posts. Connect to internet to fetch.';
+            }
             return;
         }
 
         status.textContent = '';
-        container.innerHTML = cachedPosts.map(post => createPostHTML(post)).join('');
+        container.innerHTML = postsToShow.map(post => createPostHTML(post)).join('');
     }
 
     function createPostHTML(post) {
@@ -840,6 +926,7 @@
         safeSetItem('subreddits', subreddits);
 
         hideWelcomeScreen();
+        updateFeedTabsVisibility();
         renderSubreddits();
         fetchPosts();
     }

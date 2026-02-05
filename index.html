@@ -280,6 +280,38 @@
             font-size: 14px;
         }
 
+        .feed-tabs {
+            display: flex;
+            background: white;
+            margin: 0 16px 10px;
+            border-radius: 4px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .feed-tab {
+            flex: 1;
+            padding: 12px;
+            text-align: center;
+            font-size: 14px;
+            font-weight: 700;
+            color: #7c7c7c;
+            background: white;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+            border-bottom: 3px solid transparent;
+        }
+
+        .feed-tab:hover {
+            background: #f5f5f5;
+        }
+
+        .feed-tab.active {
+            color: #ff4500;
+            border-bottom-color: #ff4500;
+        }
+
         .error {
             background: #fff3cd;
             color: #856404;
@@ -519,6 +551,11 @@
     </div>
 
     <div class="status" id="status">Add subreddits to see posts</div>
+
+    <div class="feed-tabs" id="feedTabs" style="display: none;">
+        <button class="feed-tab active" id="myFeedTab">My Feed</button>
+        <button class="feed-tab" id="popularFeedTab">Popular</button>
+    </div>
 
     <div id="posts"></div>
 
