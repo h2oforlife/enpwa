@@ -1,4 +1,5 @@
 // Reddit PWA Service Worker
+// Version: 2025-02-04-v2
 
 const CACHE_NAME = 'reddit-pwa-app-shell';
 const RUNTIME_CACHE = 'reddit-pwa-runtime';

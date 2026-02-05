@@ -256,7 +256,6 @@
         overlay.classList.toggle('active');
 
         if (sidebar.classList.contains('open')) {
-            updateRateLimitStats();
             updateVersionInfo();
         }
     }
@@ -510,6 +509,7 @@
             alert('You are offline. Cannot refresh posts.');
             return;
         }
+        toggleSidebar(); // Close sidebar
         fetchPosts();
     }
 
@@ -607,19 +607,32 @@
             return '';
         }
 
-        const truncated = post.selftext.substring(0, 300);
-        let text = escapeHTML(truncated);
+        let text = post.selftext.substring(0, 300);
         
-        // Parse markdown-style links: [text](url) or just [url](url)
-        text = text.replace(/\[\s*(https?:\/\/[^\]]+)\s*\]\s*\(\s*(https?:\/\/[^\)]+)\s*\)/g, 
-            '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+        // Convert markdown links [text](url) to HTML links before escaping
+        // Match and replace with a simple callback
+        const parts = [];
+        let lastIndex = 0;
+        const linkRegex = /\[([^\]]+)\]\(([^\)]+)\)/g;
+        let match;
         
-        // Parse bare URLs in text
-        text = text.replace(/(https?:\/\/[^\s<]+)/g, 
-            '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+        while ((match = linkRegex.exec(text)) !== null) {
+            // Add text before the link (escaped)
+            if (match.index > lastIndex) {
+                parts.push(escapeHTML(text.substring(lastIndex, match.index)));
+            }
+            // Add the link
+            parts.push(`<a href="${escapeHTML(match[2])}" target="_blank" rel="noopener noreferrer">${escapeHTML(match[1])}</a>`);
+            lastIndex = match.index + match[0].length;
+        }
         
-        text += (post.selftext.length > 300 ? '...' : '');
-        return `<div class="post-text">${text}</div>`;
+        // Add remaining text after last link (escaped)
+        if (lastIndex < text.length) {
+            parts.push(escapeHTML(text.substring(lastIndex)));
+        }
+        
+        const html = parts.join('') + (post.selftext.length > 300 ? '...' : '');
+        return `<div class="post-text">${html}</div>`;
     }
 
     function escapeHTML(str) {
@@ -657,7 +670,6 @@
     // ============================================================================
     function updateAllDisplays() {
         updateRateLimitDisplay();
-        updateRateLimitStats();
         updateVersionInfo();
     }
 
@@ -678,23 +690,6 @@
                 rateLimitInfo.style.background = 'rgba(76, 175, 80, 0.8)';
             }
         }
-    }
-
-    function updateRateLimitStats() {
-        const statsElement = document.getElementById('rateLimitStats');
-        if (!statsElement) return;
-
-        const resetTime = new Date(rateLimitState.resetTime).toLocaleTimeString();
-        
-        statsElement.innerHTML = `
-            <div style="margin-bottom: 8px;"><strong>Current Status:</strong></div>
-            <div>Requests Made: ${rateLimitState.requestCount}</div>
-            <div>Remaining: ${rateLimitState.remainingRequests}/${CONFIG.REQUESTS_PER_MINUTE}</div>
-            <div>Reset Time: ${resetTime}</div>
-            <div style="margin-top: 8px; font-size: 11px; color: #999;">
-                Rate Limit: 1 request per ${CONFIG.REQUEST_INTERVAL / 1000} seconds
-            </div>
-        `;
     }
 
     function updateVersionInfo() {
