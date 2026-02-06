@@ -283,7 +283,7 @@
         .feed-tabs {
             display: flex;
             background: white;
-            margin: 4px 0 10px;
+            margin: 4px 0 4px;
             border-radius: 4px;
             overflow: hidden;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
@@ -292,6 +292,157 @@
         .offline-banner.active ~ .main-content .feed-tabs,
         .update-notification.active ~ .main-content .feed-tabs {
             margin-top: 10px;
+        }
+
+        .subreddit-filter {
+            display: none;
+            overflow-x: auto;
+            white-space: nowrap;
+            padding: 8px 16px;
+            margin-bottom: 4px;
+            background: #f5f5f5;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .subreddit-filter.active {
+            display: block;
+        }
+
+        .subreddit-filter::-webkit-scrollbar {
+            height: 4px;
+        }
+
+        .subreddit-filter::-webkit-scrollbar-track {
+            background: #ddd;
+        }
+
+        .subreddit-filter::-webkit-scrollbar-thumb {
+            background: #ff4500;
+            border-radius: 2px;
+        }
+
+        .filter-chip {
+            display: inline-block;
+            padding: 6px 12px;
+            margin-right: 8px;
+            background: white;
+            border: 2px solid #ddd;
+            border-radius: 16px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .filter-chip:hover {
+            border-color: #ff4500;
+        }
+
+        .filter-chip.active {
+            background: #ff4500;
+            color: white;
+            border-color: #ff4500;
+        }
+
+        .subreddit-popup {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 400;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .subreddit-popup.active {
+            display: flex;
+        }
+
+        .subreddit-popup-content {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            max-width: 400px;
+            width: 100%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .subreddit-popup-header {
+            font-size: 20px;
+            font-weight: 700;
+            color: #ff4500;
+            margin-bottom: 12px;
+        }
+
+        .subreddit-popup-info {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 16px;
+            line-height: 1.5;
+        }
+
+        .subreddit-popup-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .subreddit-popup-actions button {
+            flex: 1;
+            padding: 10px 16px;
+            border: none;
+            border-radius: 20px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .popup-btn-follow {
+            background: #0079d3;
+            color: white;
+        }
+
+        .popup-btn-follow:hover {
+            background: #0060a8;
+        }
+
+        .popup-btn-follow.following {
+            background: #ccc;
+        }
+
+        .popup-btn-block {
+            background: #f44336;
+            color: white;
+        }
+
+        .popup-btn-block:hover {
+            background: #d32f2f;
+        }
+
+        .popup-btn-block.blocked {
+            background: #666;
+        }
+
+        .popup-btn-close {
+            background: #ddd;
+            color: #333;
+        }
+
+        .popup-btn-close:hover {
+            background: #ccc;
+        }
+
+        .post-header .subreddit-name {
+            cursor: pointer;
+            text-decoration: underline;
+        }
+
+        .post-header .subreddit-name:hover {
+            color: #ff4500;
         }
 
         .feed-tab {
@@ -569,15 +720,28 @@
     </div>
 
     <div class="main-content">
-        <div class="status" id="status">Add subreddits to see posts</div>
+    <div class="status" id="status">Add subreddits to see posts</div>
 
-        <div class="feed-tabs" id="feedTabs" style="display: none;">
-            <button class="feed-tab active" id="myFeedTab">My Feed</button>
-            <button class="feed-tab" id="popularFeedTab">Popular</button>
-        </div>
-
-        <div id="posts"></div>
+    <div class="feed-tabs" id="feedTabs" style="display: none;">
+        <button class="feed-tab active" id="myFeedTab">My Feed</button>
+        <button class="feed-tab" id="popularFeedTab">Popular</button>
     </div>
+
+    <div class="subreddit-filter" id="subredditFilter"></div>
+
+    <div class="subreddit-popup" id="subredditPopup">
+        <div class="subreddit-popup-content">
+            <div class="subreddit-popup-header" id="popupSubredditName"></div>
+            <div class="subreddit-popup-info" id="popupSubredditInfo"></div>
+            <div class="subreddit-popup-actions">
+                <button class="popup-btn-follow" id="popupFollowBtn">Follow</button>
+                <button class="popup-btn-block" id="popupBlockBtn">Block</button>
+                <button class="popup-btn-close" id="popupCloseBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="posts"></div>
 
     <script src="./app.js"></script>
 </body>

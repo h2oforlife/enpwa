@@ -1,4 +1,4 @@
-// Emergency News PWA - Main Application Logic
+// Reddit PWA - Main Application Logic
 
 (function() {
     'use strict';
@@ -23,7 +23,9 @@
     let subreddits = [];
     let cachedPosts = [];
     let popularPosts = [];
+    let blockedSubreddits = [];
     let currentFeed = 'my'; // 'my' or 'popular'
+    let activeFilter = 'all'; // 'all' or specific subreddit name
     let rateLimitState = {
         lastRequestTime: 0,
         remainingRequests: CONFIG.REQUESTS_PER_MINUTE,
@@ -67,6 +69,7 @@
         subreddits = safeGetItem('subreddits', []);
         cachedPosts = safeGetItem('cachedPosts', []);
         popularPosts = safeGetItem('popularPosts', []);
+        blockedSubreddits = safeGetItem('blockedSubreddits', []);
         currentFeed = safeGetItem('currentFeed', 'my');
         const savedRateLimitState = safeGetItem('rateLimitState', null);
         
@@ -91,6 +94,7 @@
             showWelcomeScreen();
         } else {
             renderSubreddits();
+            renderSubredditFilter();
             switchFeed(currentFeed); // Restore saved feed
             updateAllDisplays();
         }
@@ -161,6 +165,21 @@
         const popularFeedTab = document.getElementById('popularFeedTab');
         if (myFeedTab) myFeedTab.addEventListener('click', () => switchFeed('my'));
         if (popularFeedTab) popularFeedTab.addEventListener('click', () => switchFeed('popular'));
+
+        // Subreddit popup
+        const popupCloseBtn = document.getElementById('popupCloseBtn');
+        const popupFollowBtn = document.getElementById('popupFollowBtn');
+        const popupBlockBtn = document.getElementById('popupBlockBtn');
+        const subredditPopup = document.getElementById('subredditPopup');
+        
+        if (popupCloseBtn) popupCloseBtn.addEventListener('click', closeSubredditPopup);
+        if (popupFollowBtn) popupFollowBtn.addEventListener('click', toggleFollowSubreddit);
+        if (popupBlockBtn) popupBlockBtn.addEventListener('click', toggleBlockSubreddit);
+        if (subredditPopup) {
+            subredditPopup.addEventListener('click', (e) => {
+                if (e.target === subredditPopup) closeSubredditPopup();
+            });
+        }
     }
 
     // ============================================================================
@@ -293,6 +312,142 @@
     }
 
     // ============================================================================
+    // SUBREDDIT FILTERING
+    // ============================================================================
+    function renderSubredditFilter() {
+        const filterBar = document.getElementById('subredditFilter');
+        if (!filterBar) return;
+
+        if (currentFeed === 'my' && subreddits.length > 0) {
+            filterBar.classList.add('active');
+            
+            const chips = ['<span class="filter-chip active" data-filter="all">All</span>'];
+            subreddits.forEach(sub => {
+                chips.push(`<span class="filter-chip" data-filter="${sub}">r/${sub}</span>`);
+            });
+            
+            filterBar.innerHTML = chips.join('');
+            
+            // Add click handlers
+            filterBar.querySelectorAll('.filter-chip').forEach(chip => {
+                chip.addEventListener('click', () => {
+                    const filter = chip.dataset.filter;
+                    setActiveFilter(filter);
+                });
+            });
+        } else {
+            filterBar.classList.remove('active');
+        }
+    }
+
+    function setActiveFilter(filter) {
+        activeFilter = filter;
+        
+        // Update UI
+        document.querySelectorAll('.filter-chip').forEach(chip => {
+            if (chip.dataset.filter === filter) {
+                chip.classList.add('active');
+            } else {
+                chip.classList.remove('active');
+            }
+        });
+        
+        renderPosts();
+    }
+
+    // ============================================================================
+    // SUBREDDIT POPUP
+    // ============================================================================
+    let currentPopupSubreddit = null;
+
+    function openSubredditPopup(subredditName) {
+        currentPopupSubreddit = subredditName;
+        const popup = document.getElementById('subredditPopup');
+        const nameEl = document.getElementById('popupSubredditName');
+        const infoEl = document.getElementById('popupSubredditInfo');
+        const followBtn = document.getElementById('popupFollowBtn');
+        const blockBtn = document.getElementById('popupBlockBtn');
+        
+        if (!popup || !nameEl || !infoEl) return;
+
+        nameEl.textContent = `r/${subredditName}`;
+        infoEl.textContent = `Community discussions from r/${subredditName}`;
+        
+        // Update button states
+        const isFollowing = subreddits.includes(subredditName);
+        const isBlocked = blockedSubreddits.includes(subredditName);
+        
+        if (followBtn) {
+            followBtn.textContent = isFollowing ? 'Following' : 'Follow';
+            followBtn.className = isFollowing ? 'popup-btn-follow following' : 'popup-btn-follow';
+        }
+        
+        if (blockBtn) {
+            blockBtn.textContent = isBlocked ? 'Blocked' : 'Block';
+            blockBtn.className = isBlocked ? 'popup-btn-block blocked' : 'popup-btn-block';
+        }
+        
+        popup.classList.add('active');
+    }
+
+    function closeSubredditPopup() {
+        const popup = document.getElementById('subredditPopup');
+        if (popup) popup.classList.remove('active');
+        currentPopupSubreddit = null;
+    }
+
+    function toggleFollowSubreddit() {
+        if (!currentPopupSubreddit) return;
+        
+        if (subreddits.includes(currentPopupSubreddit)) {
+            // Unfollow
+            subreddits = subreddits.filter(s => s !== currentPopupSubreddit);
+        } else {
+            // Follow
+            subreddits.push(currentPopupSubreddit);
+        }
+        
+        safeSetItem('subreddits', subreddits);
+        renderSubreddits();
+        renderSubredditFilter();
+        updateFeedTabsVisibility();
+        
+        // Update button state
+        const followBtn = document.getElementById('popupFollowBtn');
+        const isFollowing = subreddits.includes(currentPopupSubreddit);
+        if (followBtn) {
+            followBtn.textContent = isFollowing ? 'Following' : 'Follow';
+            followBtn.className = isFollowing ? 'popup-btn-follow following' : 'popup-btn-follow';
+        }
+    }
+
+    function toggleBlockSubreddit() {
+        if (!currentPopupSubreddit) return;
+        
+        if (blockedSubreddits.includes(currentPopupSubreddit)) {
+            // Unblock
+            blockedSubreddits = blockedSubreddits.filter(s => s !== currentPopupSubreddit);
+        } else {
+            // Block
+            blockedSubreddits.push(currentPopupSubreddit);
+        }
+        
+        safeSetItem('blockedSubreddits', blockedSubreddits);
+        renderPosts(); // Re-render to hide blocked posts
+        
+        // Update button state
+        const blockBtn = document.getElementById('popupBlockBtn');
+        const isBlocked = blockedSubreddits.includes(currentPopupSubreddit);
+        if (blockBtn) {
+            blockBtn.textContent = isBlocked ? 'Blocked' : 'Block';
+            blockBtn.className = isBlocked ? 'popup-btn-block blocked' : 'popup-btn-block';
+        }
+    }
+
+    // Expose function globally for onclick
+    window.openSubredditPopup = openSubredditPopup;
+
+    // ============================================================================
     // FEED SWITCHING
     // ============================================================================
     function updateFeedTabsVisibility() {
@@ -305,6 +460,9 @@
     function switchFeed(feed) {
         currentFeed = feed;
         safeSetItem('currentFeed', currentFeed);
+
+        // Reset filter when switching feeds
+        activeFilter = 'all';
 
         // Update tab active states
         const myFeedTab = document.getElementById('myFeedTab');
@@ -319,6 +477,9 @@
                 popularFeedTab.classList.add('active');
             }
         }
+
+        // Show/hide filter bar
+        renderSubredditFilter();
 
         // Render appropriate posts
         renderPosts();
@@ -650,14 +811,28 @@
         const container = document.getElementById('posts');
         const status = document.getElementById('status');
 
-        const postsToShow = currentFeed === 'my' ? cachedPosts : popularPosts;
+        let postsToShow = currentFeed === 'my' ? cachedPosts : popularPosts;
+
+        // Filter by active subreddit filter (My Feed only)
+        if (currentFeed === 'my' && activeFilter !== 'all') {
+            postsToShow = postsToShow.filter(post => post.subreddit === activeFilter);
+        }
+
+        // Filter out blocked subreddits (Popular feed only)
+        if (currentFeed === 'popular') {
+            postsToShow = postsToShow.filter(post => !blockedSubreddits.includes(post.subreddit));
+        }
 
         if (postsToShow.length === 0) {
             container.innerHTML = '';
             if (currentFeed === 'my') {
-                status.textContent = navigator.onLine ? 
-                    'No posts yet. Add subreddits and click "Refresh Posts".' : 
-                    'No cached posts available. Connect to internet and refresh.';
+                if (activeFilter !== 'all') {
+                    status.textContent = `No posts from r/${activeFilter}`;
+                } else {
+                    status.textContent = navigator.onLine ? 
+                        'No posts yet. Add subreddits and click "Refresh Posts".' : 
+                        'No cached posts available. Connect to internet and refresh.';
+                }
             } else {
                 status.textContent = navigator.onLine ? 
                     'No popular posts yet. They will load automatically.' : 
@@ -674,10 +849,15 @@
         const imageHtml = getImageHTML(post);
         const selftext = getSelftextHTML(post);
 
+        // Make subreddit clickable only in Popular feed
+        const subredditHTML = currentFeed === 'popular' 
+            ? `<span class="subreddit-name" onclick="window.openSubredditPopup('${escapeHTML(post.subreddit)}')">r/${escapeHTML(post.subreddit)}</span>`
+            : `<span class="subreddit-name">r/${escapeHTML(post.subreddit)}</span>`;
+
         return `
             <div class="post">
                 <div class="post-header">
-                    <span class="subreddit-name">r/${escapeHTML(post.subreddit)}</span>
+                    ${subredditHTML}
                     • Posted by <span class="post-author">u/${escapeHTML(post.author)}</span>
                     • ${formatTime(post.created_utc)}
                 </div>
@@ -942,6 +1122,7 @@
         hideWelcomeScreen();
         updateFeedTabsVisibility();
         renderSubreddits();
+        renderSubredditFilter();
         fetchPosts();
     }
 
