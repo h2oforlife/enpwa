@@ -307,6 +307,7 @@
         overlay.classList.toggle('active');
 
         if (sidebar.classList.contains('open')) {
+            updateStorageStats();
             updateVersionInfo();
         }
     }
@@ -569,6 +570,9 @@
             if (posts.length > 0) {
                 popularPosts = posts.sort((a, b) => b.created_utc - a.created_utc);
                 safeSetItem('popularPosts', popularPosts);
+                
+                // Check storage and cleanup if needed
+                cleanupOldPosts();
             }
         } catch (error) {
             console.error('Failed to fetch popular posts:', error);
@@ -780,6 +784,9 @@
                     const uniquePosts = removeDuplicatePosts(allPosts);
                     cachedPosts = uniquePosts.sort((a, b) => b.created_utc - a.created_utc);
                     safeSetItem('cachedPosts', cachedPosts);
+                    
+                    // Check storage and cleanup if needed after each subreddit
+                    cleanupOldPosts();
                 }
             } catch (error) {
                 errors.push(`r/${sub}: ${error.message}`);
@@ -1040,6 +1047,7 @@
     // ============================================================================
     function updateAllDisplays() {
         updateRateLimitDisplay();
+        updateStorageStats();
         updateVersionInfo();
     }
 
@@ -1230,6 +1238,113 @@
         renderSubreddits();
         renderPosts();
         updateAllDisplays();
+    }
+
+    // ============================================================================
+    // STORAGE MANAGEMENT
+    // ============================================================================
+    function getLocalStorageSize() {
+        let total = 0;
+        for (let key in localStorage) {
+            if (localStorage.hasOwnProperty(key)) {
+                total += localStorage[key].length + key.length;
+            }
+        }
+        return total * 2; // Characters are 2 bytes in UTF-16
+    }
+
+    function getStorageUsagePercent() {
+        const size = getLocalStorageSize();
+        const limit = 5 * 1024 * 1024; // 5MB conservative estimate
+        return (size / limit) * 100;
+    }
+
+    function formatBytes(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+    }
+
+    function updateStorageStats() {
+        const size = getLocalStorageSize();
+        const limit = 5 * 1024 * 1024;
+        const percent = getStorageUsagePercent();
+
+        const usageEl = document.getElementById('storageUsage');
+        const barEl = document.getElementById('storageBar');
+        const totalPostsEl = document.getElementById('totalPosts');
+        const postsPerSubEl = document.getElementById('postsPerSub');
+
+        if (usageEl) {
+            usageEl.textContent = `${formatBytes(size)} / ${formatBytes(limit)}`;
+        }
+
+        if (barEl) {
+            barEl.style.width = `${Math.min(percent, 100)}%`;
+            // Change color based on usage
+            if (percent >= 90) {
+                barEl.style.background = '#f44336';
+            } else if (percent >= 80) {
+                barEl.style.background = '#ff9800';
+            } else {
+                barEl.style.background = '#0079d3';
+            }
+        }
+
+        if (totalPostsEl) {
+            totalPostsEl.textContent = cachedPosts.length + popularPosts.length;
+        }
+
+        // Posts per subreddit breakdown
+        if (postsPerSubEl) {
+            const breakdown = {};
+            
+            // Count posts from My Feed by subreddit
+            cachedPosts.forEach(post => {
+                breakdown[post.subreddit] = (breakdown[post.subreddit] || 0) + 1;
+            });
+            
+            // Count all popular posts as single entry
+            if (popularPosts.length > 0) {
+                breakdown['popular'] = popularPosts.length;
+            }
+
+            const lines = Object.entries(breakdown)
+                .sort((a, b) => b[1] - a[1])
+                .map(([sub, count]) => `r/${sub}: ${count}`)
+                .join('<br>');
+
+            postsPerSubEl.innerHTML = lines || '<em>No posts cached</em>';
+        }
+    }
+
+    function cleanupOldPosts() {
+        const usagePercent = getStorageUsagePercent();
+        
+        if (usagePercent < 80) {
+            return; // No cleanup needed
+        }
+
+        console.log(`Storage at ${usagePercent.toFixed(1)}% - cleaning up old posts`);
+
+        // Sort all posts by age (oldest first)
+        const allPosts = [...cachedPosts, ...popularPosts];
+        const sortedByAge = allPosts.sort((a, b) => a.created_utc - b.created_utc);
+
+        // Calculate how many posts to remove (remove oldest 20% of posts)
+        const removeCount = Math.ceil(sortedByAge.length * 0.2);
+        const postsToRemove = sortedByAge.slice(0, removeCount);
+        const removeIds = new Set(postsToRemove.map(p => p.id));
+
+        // Remove from cached posts
+        cachedPosts = cachedPosts.filter(post => !removeIds.has(post.id));
+        safeSetItem('cachedPosts', cachedPosts);
+
+        // Remove from popular posts
+        popularPosts = popularPosts.filter(post => !removeIds.has(post.id));
+        safeSetItem('popularPosts', popularPosts);
+
+        console.log(`Removed ${removeCount} oldest posts. New storage: ${getStorageUsagePercent().toFixed(1)}%`);
     }
 
     // ============================================================================
