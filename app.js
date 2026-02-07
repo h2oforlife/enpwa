@@ -371,22 +371,30 @@
     // ============================================================================
     let currentPopupSubreddit = null;
 
-    function openSubredditPopup(subredditName) {
+    async function openSubredditPopup(subredditName) {
         currentPopupSubreddit = subredditName;
         const popup = document.getElementById('subredditPopup');
         const nameEl = document.getElementById('popupSubredditName');
+        const statsEl = document.getElementById('popupSubredditStats');
         const infoEl = document.getElementById('popupSubredditInfo');
+        const iconEl = document.getElementById('popupIcon');
+        const bannerEl = document.getElementById('popupBanner');
         const followBtn = document.getElementById('popupFollowBtn');
         const blockBtn = document.getElementById('popupBlockBtn');
         
         if (!popup || !nameEl || !infoEl) return;
 
+        // Show popup immediately with loading state
         nameEl.textContent = `r/${subredditName}`;
-        infoEl.textContent = `Community discussions from r/${subredditName}`;
+        statsEl.textContent = 'Loading...';
+        infoEl.textContent = 'Loading subreddit information...';
+        iconEl.style.display = 'none';
+        bannerEl.style.backgroundImage = '';
+        bannerEl.style.background = 'linear-gradient(to bottom, #ff4500, rgba(255, 69, 0, 0))';
         
         // Update button states
-        const isFollowing = subreddits.includes(subredditName);
-        const isBlocked = blockedSubreddits.includes(subredditName);
+        const isFollowing = subreddits.some(s => s.toLowerCase() === subredditName.toLowerCase());
+        const isBlocked = blockedSubreddits.some(s => s.toLowerCase() === subredditName.toLowerCase());
         
         if (followBtn) {
             followBtn.textContent = isFollowing ? 'Following' : 'Follow';
@@ -399,6 +407,42 @@
         }
         
         popup.classList.add('active');
+
+        // Fetch subreddit info from API
+        try {
+            const response = await fetch(`https://www.reddit.com/r/${subredditName}/about.json`);
+            if (!response.ok) throw new Error('Failed to fetch subreddit info');
+            
+            const data = await response.json();
+            const subData = data.data;
+            
+            // Update with real data
+            nameEl.textContent = `r/${subData.display_name || subredditName}`;
+            
+            // Stats - only show subscribers
+            const subscribers = subData.subscribers ? formatNumber(subData.subscribers) : 'N/A';
+            statsEl.textContent = `${subscribers} members`;
+            
+            // Description
+            infoEl.textContent = subData.public_description || subData.description || 'No description available.';
+            
+            // Icon
+            if (subData.icon_img && subData.icon_img.trim()) {
+                iconEl.src = subData.icon_img.replace(/&amp;/g, '&');
+                iconEl.style.display = 'block';
+            }
+            
+            // Banner - use header_img if available, otherwise gradient with key_color
+            if (subData.header_img && subData.header_img.trim()) {
+                bannerEl.style.backgroundImage = `url(${subData.header_img.replace(/&amp;/g, '&')})`;
+            } else if (subData.key_color) {
+                bannerEl.style.background = `linear-gradient(to bottom, ${subData.key_color}, rgba(255, 255, 255, 0))`;
+            }
+        } catch (error) {
+            console.error('Error fetching subreddit info:', error);
+            statsEl.textContent = '';
+            infoEl.textContent = `Community discussions from r/${subredditName}`;
+        }
     }
 
     function closeSubredditPopup() {
@@ -444,6 +488,7 @@
         }
         
         safeSetItem('blockedSubreddits', blockedSubreddits);
+        renderSubreddits(); // Update blocked list in sidebar
         renderPosts(); // Re-render to hide blocked posts
         
         // Update button state
@@ -455,8 +500,16 @@
         }
     }
 
-    // Expose function globally for onclick
+    function unblockSubreddit(sub) {
+        blockedSubreddits = blockedSubreddits.filter(s => s.toLowerCase() !== sub.toLowerCase());
+        safeSetItem('blockedSubreddits', blockedSubreddits);
+        renderSubreddits();
+        renderPosts();
+    }
+
+    // Expose functions globally for onclick
     window.openSubredditPopup = openSubredditPopup;
+    window.unblockSubreddit = unblockSubreddit;
 
     // ============================================================================
     // FEED SWITCHING
@@ -507,8 +560,8 @@
             return;
         }
 
-        const status = document.getElementById('status');
-        status.textContent = 'Fetching popular posts...';
+        const statusDot = document.getElementById('statusDot');
+        if (statusDot) statusDot.className = 'status-dot loading';
 
         try {
             const posts = await fetchSubredditPosts('popular');
@@ -516,14 +569,13 @@
             if (posts.length > 0) {
                 popularPosts = posts.sort((a, b) => b.created_utc - a.created_utc);
                 safeSetItem('popularPosts', popularPosts);
-                renderPosts();
             }
-            
-            status.textContent = '';
         } catch (error) {
-            status.textContent = `Failed to fetch popular posts: ${error.message}`;
-            console.error(error);
+            console.error('Failed to fetch popular posts:', error);
         }
+
+        // Reload page to refresh everything
+        window.location.reload();
     }
 
     // ============================================================================
@@ -531,13 +583,28 @@
     // ============================================================================
     function renderSubreddits() {
         const list = document.getElementById('subredditList');
+        const blockedList = document.getElementById('blockedList');
+        const blockedSection = document.getElementById('blockedSection');
+        
         if (subreddits.length === 0) {
             list.innerHTML = '<span style="color: #7c7c7c;">No subreddits added yet</span>';
-            return;
+        } else {
+            list.innerHTML = subreddits.map(sub => 
+                `<span class="subreddit-tag" onclick="window.removeSubreddit('${sub}')">r/${sub} ×</span>`
+            ).join('');
         }
-        list.innerHTML = subreddits.map(sub => 
-            `<span class="subreddit-tag" onclick="window.removeSubreddit('${sub}')">r/${sub} ×</span>`
-        ).join('');
+
+        // Render blocked subreddits
+        if (blockedList && blockedSection) {
+            if (blockedSubreddits.length === 0) {
+                blockedSection.style.display = 'none';
+            } else {
+                blockedSection.style.display = 'block';
+                blockedList.innerHTML = blockedSubreddits.map(sub => 
+                    `<span class="subreddit-tag blocked" onclick="window.unblockSubreddit('${sub}')">r/${sub} ×</span>`
+                ).join('');
+            }
+        }
     }
 
     async function addSubreddit() {
@@ -699,25 +766,20 @@
             return;
         }
 
-        const status = document.getElementById('status');
-        status.textContent = 'Fetching posts...';
+        const statusDot = document.getElementById('statusDot');
+        if (statusDot) statusDot.className = 'status-dot loading';
 
         const errors = [];
 
         for (const sub of subreddits) {
             try {
-                updateLoadingStatus(`Fetching r/${sub}...`);
                 const posts = await fetchSubredditPosts(sub);
                 
                 if (posts.length > 0) {
-                    // Immediately merge and display posts from this subreddit
                     const allPosts = [...cachedPosts, ...posts];
                     const uniquePosts = removeDuplicatePosts(allPosts);
                     cachedPosts = uniquePosts.sort((a, b) => b.created_utc - a.created_utc);
                     safeSetItem('cachedPosts', cachedPosts);
-                    
-                    // Render posts immediately after each fetch
-                    renderPosts();
                 }
             } catch (error) {
                 errors.push(`r/${sub}: ${error.message}`);
@@ -725,11 +787,11 @@
         }
         
         if (errors.length > 0) {
-            status.textContent = 'Some subreddits failed to load. Check console for details.';
             errors.forEach(err => console.error(err));
-        } else {
-            status.textContent = '';
         }
+
+        // Reload page to refresh everything
+        window.location.reload();
     }
 
     function removeDuplicatePosts(posts) {
@@ -870,10 +932,8 @@
         const imageHtml = getImageHTML(post);
         const selftext = getSelftextHTML(post);
 
-        // Make subreddit clickable only in Popular feed
-        const subredditHTML = currentFeed === 'popular' 
-            ? `<span class="subreddit-name" onclick="window.openSubredditPopup('${escapeHTML(post.subreddit)}')">r/${escapeHTML(post.subreddit)}</span>`
-            : `<span class="subreddit-name">r/${escapeHTML(post.subreddit)}</span>`;
+        // Make subreddit clickable in both feeds
+        const subredditHTML = `<span class="subreddit-name" onclick="window.openSubredditPopup('${escapeHTML(post.subreddit)}')">r/${escapeHTML(post.subreddit)}</span>`;
 
         return `
             <div class="post">

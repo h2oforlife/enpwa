@@ -66,6 +66,7 @@
             height: 12px;
             border-radius: 50%;
             background: #ccc;
+            position: relative;
         }
 
         .status-dot.online {
@@ -74,6 +75,26 @@
 
         .status-dot.offline {
             background: #f44336;
+        }
+
+        .status-dot.loading {
+            width: 16px;
+            height: 16px;
+            background: transparent;
+            border-radius: 50%;
+            border: 2px solid transparent;
+            border-top-color: #ffa726;
+            border-right-color: #ffa726;
+            animation: spinner 0.8s linear infinite;
+        }
+
+        .status-dot.loading::before {
+            content: none;
+        }
+
+        @keyframes spinner {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
 
         .sidebar {
@@ -188,6 +209,14 @@
 
         .subreddit-tag:hover {
             background: #0060a8;
+        }
+
+        .subreddit-tag.blocked {
+            background: #f44336;
+        }
+
+        .subreddit-tag.blocked:hover {
+            background: #d32f2f;
         }
 
         .post {
@@ -371,26 +400,82 @@
 
         .subreddit-popup-content {
             background: white;
-            border-radius: 8px;
-            padding: 20px;
+            border-radius: 12px;
+            padding: 0;
             max-width: 400px;
             width: 100%;
             max-height: 80vh;
-            overflow-y: auto;
+            overflow: hidden;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+        }
+
+        .subreddit-popup-close {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: rgba(0, 0, 0, 0.1);
+            border: none;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 20px;
+            color: #666;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .subreddit-popup-close:hover {
+            background: rgba(0, 0, 0, 0.2);
+            color: #000;
+        }
+
+        .subreddit-popup-banner {
+            height: 100px;
+            background: linear-gradient(to bottom, #ff4500, rgba(255, 69, 0, 0));
+            position: relative;
+            background-size: cover;
+            background-position: center;
+        }
+
+        .subreddit-popup-icon {
+            width: 64px;
+            height: 64px;
+            border-radius: 50%;
+            border: 4px solid white;
+            position: absolute;
+            bottom: -32px;
+            left: 20px;
+            background: white;
+            object-fit: cover;
+        }
+
+        .subreddit-popup-body {
+            padding: 44px 20px 20px;
         }
 
         .subreddit-popup-header {
             font-size: 20px;
             font-weight: 700;
-            color: #ff4500;
+            color: #1c1c1c;
+            margin-bottom: 4px;
+        }
+
+        .subreddit-popup-stats {
+            font-size: 12px;
+            color: #7c7c7c;
             margin-bottom: 12px;
         }
 
         .subreddit-popup-info {
             color: #666;
             font-size: 14px;
-            margin-bottom: 16px;
+            margin-bottom: 20px;
             line-height: 1.5;
+            max-height: 150px;
+            overflow-y: auto;
         }
 
         .subreddit-popup-actions {
@@ -434,15 +519,6 @@
             background: #666;
         }
 
-        .popup-btn-close {
-            background: #ddd;
-            color: #333;
-        }
-
-        .popup-btn-close:hover {
-            background: #ccc;
-        }
-
         .post-header .subreddit-name {
             cursor: pointer;
             text-decoration: underline;
@@ -479,7 +555,7 @@
             background: #fff3cd;
             color: #856404;
             padding: 12px;
-            margin: 0 0 16px;
+            margin: 16px;
             border-radius: 4px;
             border: 1px solid #ffeaa7;
         }
@@ -655,13 +731,11 @@
         .main-content {
             max-width: 600px;
             margin: 0 auto;
-            padding: 0 16px;
         }
 
         @media (max-width: 768px) {
             .main-content {
                 max-width: 100%;
-                padding: 0 16px;
             }
         }
     </style>
@@ -703,6 +777,11 @@
             </div>
             <div class="subreddit-list" id="subredditList"></div>
             
+            <div id="blockedSection" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee; display: none;">
+                <h3 style="font-size: 14px; margin-bottom: 10px; color: #f44336;">Blocked Subreddits</h3>
+                <div class="subreddit-list" id="blockedList"></div>
+            </div>
+            
             <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
                 <div class="button-row">
                     <button id="exportBtn">Export</button>
@@ -738,12 +817,18 @@
 
     <div class="subreddit-popup" id="subredditPopup">
         <div class="subreddit-popup-content">
-            <div class="subreddit-popup-header" id="popupSubredditName"></div>
-            <div class="subreddit-popup-info" id="popupSubredditInfo"></div>
-            <div class="subreddit-popup-actions">
-                <button class="popup-btn-follow" id="popupFollowBtn">Follow</button>
-                <button class="popup-btn-block" id="popupBlockBtn">Block</button>
-                <button class="popup-btn-close" id="popupCloseBtn">Close</button>
+            <button class="subreddit-popup-close" id="popupCloseBtn">×</button>
+            <div class="subreddit-popup-banner" id="popupBanner">
+                <img class="subreddit-popup-icon" id="popupIcon" src="" alt="" style="display: none;">
+            </div>
+            <div class="subreddit-popup-body">
+                <div class="subreddit-popup-header" id="popupSubredditName"></div>
+                <div class="subreddit-popup-stats" id="popupSubredditStats"></div>
+                <div class="subreddit-popup-info" id="popupSubredditInfo"></div>
+                <div class="subreddit-popup-actions">
+                    <button class="popup-btn-follow" id="popupFollowBtn">Follow</button>
+                    <button class="popup-btn-block" id="popupBlockBtn">Block</button>
+                </div>
             </div>
         </div>
     </div>
