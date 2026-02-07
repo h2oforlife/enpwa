@@ -284,17 +284,17 @@
             return;
         }
 
-        // Save update timestamp before reloading
+        // Save update timestamp
         const now = new Date();
         safeSetItem('lastUpdateTime', now.toISOString());
 
         // Tell the service worker to skip waiting
         navigator.serviceWorker.controller.postMessage({ type: 'SKIP_WAITING' });
         
-        // Force reload after a short delay to ensure SW activated
-        setTimeout(() => {
+        // Listen for the new service worker to take control, then reload
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
             window.location.reload();
-        }, 100);
+        }, { once: true });
     }
 
     // ============================================================================
@@ -809,6 +809,10 @@
             return;
         }
 
+        // Clear status message while fetching
+        const status = document.getElementById('status');
+        if (status) status.textContent = '';
+
         const statusDot = document.getElementById('statusDot');
         if (statusDot) statusDot.className = 'status-dot loading';
 
@@ -966,16 +970,27 @@
         }
 
         if (postsToShow.length === 0) {
-            container.innerHTML = '';
+            status.textContent = ''; // Clear top status
+            
+            // Show status as a post card
+            let message = '';
             if (currentFeed === 'my') {
-                status.textContent = navigator.onLine ? 
+                message = navigator.onLine ? 
                     'No posts yet. Add subreddits and click "Refresh Posts".' : 
                     'No cached posts available. Connect to internet and refresh.';
             } else {
-                status.textContent = navigator.onLine ? 
+                message = navigator.onLine ? 
                     'No popular posts yet. They will load automatically.' : 
                     'No cached popular posts. Connect to internet to fetch.';
             }
+            
+            container.innerHTML = `
+                <div class="post">
+                    <div class="post-text" style="text-align: center; padding: 40px 20px; color: #7c7c7c;">
+                        ${message}
+                    </div>
+                </div>
+            `;
             return;
         }
 
