@@ -1352,8 +1352,20 @@
             posts = posts.filter(p => !state.blocked.some(b => b.toLowerCase() === p.subreddit.toLowerCase()));
         }
         
+        // Check if we're syncing
+        const isSyncing = state.isProcessingQueue || state.syncQueue.some(j => 
+            j.status === 'processing' || j.status === 'pending'
+        );
+        
         if (posts.length === 0) {
             if (status) status.textContent = '';
+            
+            // Don't show "No posts yet" if we're actively syncing
+            if (isSyncing && state.current === 'my') {
+                container.innerHTML = ''; // Empty container while syncing
+                return;
+            }
+            
             const messages = {
                 starred: 'No starred posts yet. Tap the ★ icon on posts to save them here.',
                 my: navigator.onLine ? 'No posts yet. Add subreddits and click "Refresh Posts".' : 'No cached posts. Connect to internet and refresh.',
@@ -1532,11 +1544,14 @@
                 a.toLowerCase().localeCompare(b.toLowerCase())
             );
             
-            list.innerHTML = sortedSubs.length === 0 
+            const title = '<h3 style="font-size: 14px; margin-bottom: 10px; color: #666;">Followed Subreddits</h3>';
+            const content = sortedSubs.length === 0 
                 ? '<span style="color: #7c7c7c;">No subreddits added yet</span>'
                 : sortedSubs.map(sub => 
                     `<span class="subreddit-tag" onclick="window.removeSubreddit('${sub}')">r/${sub} ×</span>`
                   ).join('');
+            
+            list.innerHTML = title + content;
         }
         
         if (blockedList && blockedSection) {
@@ -1613,25 +1628,21 @@
     function refreshPosts() {
         if (!navigator.onLine) {
             showToast('You are offline. Updates queued for when connection is restored.', { type: 'info' });
-            if (state.current === 'my') {
-                state.subreddits.forEach(sub => {
-                    queueSyncJob('fetch_subreddit', sub);
-                });
-            } else if (state.current === 'popular') {
-                queueSyncJob('fetch_popular');
-            }
+            // Queue jobs for both feeds when offline
+            state.subreddits.forEach(sub => {
+                queueSyncJob('fetch_subreddit', sub);
+            });
+            queueSyncJob('fetch_popular');
             return;
         }
         
         toggleSidebar();
         
-        if (state.current === 'my') {
-            state.subreddits.forEach(sub => {
-                queueSyncJob('fetch_subreddit', sub);
-            });
-        } else if (state.current === 'popular') {
-            queueSyncJob('fetch_popular');
-        }
+        // Always refresh both My Feed and Popular feed
+        state.subreddits.forEach(sub => {
+            queueSyncJob('fetch_subreddit', sub);
+        });
+        queueSyncJob('fetch_popular');
         
         // Start processing queue immediately
         processSyncQueue();
