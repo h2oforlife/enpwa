@@ -17,7 +17,8 @@
         REQUEST_TIMEOUT: 15000,
         CLEANUP_THRESHOLD: 90, // Only cleanup when storage is 90%+ full
         JOB_DELAY_MS: 1000,
-        MAX_SAFE_STORAGE: 8 * 1024 * 1024
+        MAX_SAFE_STORAGE: 8 * 1024 * 1024,
+        MAX_POST_AGE_DAYS: 30 // Posts older than this will be deleted
     };
 
     // ============================================================================
@@ -43,7 +44,8 @@
         isProcessingQueue: false,
         countrySuggestions: [],
         selectedCountry: null,
-        storageQuota: 5 * 1024 * 1024
+        storageQuota: 5 * 1024 * 1024,
+        newPostsToast: null // Reference to persistent toast
     };
 
     // Periodic task intervals
@@ -100,6 +102,10 @@
                 state.current = parsed.currentFeed || 'my';
                 state.syncQueue = parsed.syncQueue || [];
                 
+                // Load pending posts
+                state.feeds.my.pending = parsed.myPending || { posts: [], count: 0 };
+                state.feeds.popular.pending = parsed.popularPending || { posts: [], count: 0 };
+                
                 // Fix rate limit state corruption
                 if (parsed.rateLimitState) {
                     const now = Date.now();
@@ -136,6 +142,9 @@
         
         // Validate and clean up sync queue
         validateSyncQueue();
+        
+        // Clean old posts after loading
+        cleanupOldPostsByAge();
     }
 
     function validateSyncQueue() {
@@ -181,7 +190,9 @@
                 blockedSubreddits: state.blocked,
                 currentFeed: state.current,
                 rateLimitState: state.rateLimitState,
-                syncQueue: state.syncQueue
+                syncQueue: state.syncQueue,
+                myPending: state.feeds.my.pending,
+                popularPending: state.feeds.popular.pending
             };
             
             localStorage.setItem('appState', JSON.stringify(toSave));
@@ -221,24 +232,25 @@
             type = 'info',
             duration = 3000,
             actions = [],
-            position = 'bottom'
+            position = 'bottom',
+            persistent = false
         } = options;
         
         // Remove existing toast of same type if any
-        const existingId = type === 'update' ? 'updateToast' : null;
+        const existingId = type === 'update' ? 'updateToast' : (persistent ? 'persistentToast' : null);
         if (existingId) {
             const existing = document.getElementById(existingId);
             if (existing) existing.remove();
-        } else {
-            const existing = document.querySelector('.toast-message');
+        } else if (!persistent) {
+            const existing = document.querySelector('.toast-message:not(#persistentToast)');
             if (existing) existing.remove();
         }
         
         const toast = document.createElement('div');
         
-        if (type === 'update' && actions.length > 0) {
+        if ((type === 'update' || persistent) && actions.length > 0) {
             // Update toast (top, with actions)
-            toast.id = 'updateToast';
+            toast.id = persistent ? 'persistentToast' : 'updateToast';
             toast.className = 'update-toast';
             
             const actionsHtml = actions.map(action => 
@@ -249,12 +261,16 @@
                 <div class="toast-content">
                     <span class="toast-message">${message}</span>
                     ${actionsHtml}
-                    <button class="toast-close" onclick="window.dismissToast()">×</button>
+                    <button class="toast-close" onclick="window.dismissToast('${toast.id}')">×</button>
                 </div>
             `;
             
             document.body.appendChild(toast);
             setTimeout(() => toast.classList.add('visible'), 10);
+            
+            if (persistent) {
+                state.newPostsToast = toast;
+            }
         } else {
             // Regular toast (bottom, auto-dismiss)
             toast.className = `toast-message toast-${type}`;
@@ -274,11 +290,14 @@
         return toast;
     }
 
-    window.dismissToast = function() {
-        const toast = document.getElementById('updateToast');
+    window.dismissToast = function(toastId) {
+        const toast = document.getElementById(toastId || 'updateToast');
         if (toast) {
             toast.classList.remove('visible');
             setTimeout(() => toast.remove(), 300);
+            if (toastId === 'persistentToast') {
+                state.newPostsToast = null;
+            }
         }
     };
 
@@ -415,192 +434,203 @@
         while (true) {
             const now = Date.now();
             
-            // Reset if past reset time
+            // Reset counter if window expired
             if (now >= state.rateLimitState.resetTime) {
                 state.rateLimitState.remainingRequests = CONFIG.REQUESTS_PER_MINUTE;
                 state.rateLimitState.resetTime = now + CONFIG.RATE_LIMIT_RESET_INTERVAL;
                 state.rateLimitState.requestCount = 0;
-            }
-
-            const timeSinceLastRequest = now - state.rateLimitState.lastRequestTime;
-            
-            if (timeSinceLastRequest >= CONFIG.REQUEST_INTERVAL && state.rateLimitState.remainingRequests > 0) {
-                break; // Can make request
+                debouncedSave();
             }
             
-            // Wait a bit
-            const delay = Math.max(100, CONFIG.REQUEST_INTERVAL - timeSinceLastRequest);
-            await new Promise(resolve => setTimeout(resolve, delay));
+            // Check if we can proceed
+            if (state.rateLimitState.remainingRequests > 0) {
+                const timeSinceLastRequest = now - state.rateLimitState.lastRequestTime;
+                if (timeSinceLastRequest >= CONFIG.REQUEST_INTERVAL) {
+                    return; // OK to proceed
+                }
+                
+                // Wait for minimum interval
+                const waitTime = CONFIG.REQUEST_INTERVAL - timeSinceLastRequest;
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+                return;
+            }
+            
+            // Wait until reset time
+            const waitTime = Math.max(0, state.rateLimitState.resetTime - now);
+            console.log(`Rate limit reached. Waiting ${waitTime}ms...`);
+            await new Promise(resolve => setTimeout(resolve, waitTime + 100));
         }
     }
 
     // ============================================================================
-    // SYNC QUEUE - Enhanced with atomic operations and timeout
+    // SYNC QUEUE - Improved with better parallelization
     // ============================================================================
-    function acquireProcessingLock() {
-        if (processingLock) {
-            if (processingLockTimeout && Date.now() - processingLockTimeout > SYNC_CONFIG.PROCESSING_LOCK_TIMEOUT_MS) {
-                // Force unlock if lock is stale
-                processingLock = false;
-                processingLockTimeout = null;
-                console.warn('Force unlocked processing lock - was stale');
-            } else {
-                return false;
-            }
-        }
-        
-        processingLock = true;
-        processingLockTimeout = Date.now();
-        return true;
-    }
-
-    function releaseProcessingLock() {
-        processingLock = false;
-        processingLockTimeout = null;
-    }
-
-    function findExistingJob(type, subreddit) {
-        return state.syncQueue.find(job =>
-            job.type === type &&
-            job.subreddit === subreddit &&
-            (job.status === 'pending' || job.status === 'processing')
-        );
-    }
-
     function queueSyncJob(type, subreddit = null) {
-        // Acquire lock atomically
-        if (!acquireProcessingLock()) {
-            console.warn('Cannot acquire processing lock for job queue');
+        // Check for duplicate
+        const isDuplicate = state.syncQueue.some(job => 
+            job.type === type && 
+            job.subreddit === subreddit &&
+            job.status !== 'completed' &&
+            job.status !== 'failed_max_retries'
+        );
+        
+        if (isDuplicate) {
+            console.log(`Job already queued: ${type}/${subreddit || 'N/A'}`);
             return null;
         }
         
-        try {
-            // Prevent duplicate jobs
-            const existingJob = findExistingJob(type, subreddit);
-            if (existingJob) {
-                return existingJob; // Already queued, don't add duplicate
-            }
-            
-            const job = {
-                id: `${type}_${subreddit || 'all'}_${Date.now()}`,
-                type: type,
-                subreddit: subreddit,
-                timestamp: Date.now(),
-                retries: 0,
-                status: 'pending',
-                startTime: null // Track when processing started
-            };
-            
-            state.syncQueue.push(job);
-            console.log(`Queued sync job: ${job.id}`);
-            debouncedSave();
-            
-            if (navigator.onLine && !state.isProcessingQueue) {
-                processSyncQueue();
-            }
-            
-            updateQueueStatus();
-            return job;
-        } finally {
-            releaseProcessingLock();
-        }
+        const job = {
+            id: `${type}-${subreddit || 'popular'}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            type,
+            subreddit,
+            status: 'pending',
+            retries: 0,
+            timestamp: Date.now(),
+            startTime: null
+        };
+        
+        state.syncQueue.push(job);
+        debouncedSave();
+        
+        console.log(`Queued job: ${job.id}`);
+        return job;
     }
 
     async function processSyncQueue() {
-        if (state.isProcessingQueue || state.syncQueue.length === 0) return;
+        // Prevent concurrent processing
+        if (state.isProcessingQueue) {
+            console.log('Already processing queue, skipping');
+            return;
+        }
         
+        if (!navigator.onLine) {
+            console.log('Offline, cannot process queue');
+            return;
+        }
+        
+        console.log(`Starting queue processing with ${state.syncQueue.length} jobs`);
         state.isProcessingQueue = true;
         updateQueueStatus();
+        updateSyncingStatus(); // Update UI to show syncing
         
-        const pendingJobs = state.syncQueue.filter(j => j.status === 'pending' || j.status === 'failed');
-        let syncInterrupted = false;
+        const dot = document.getElementById('statusDot');
+        if (dot) dot.classList.add('loading');
         
-        for (const job of pendingJobs) {
-            if (!navigator.onLine) {
-                syncInterrupted = true;
-                break;
-            }
-            
-            // Check for job timeout
-            if (job.status === 'processing' && job.startTime &&
-                Date.now() - job.startTime > SYNC_CONFIG.JOB_TIMEOUT_MS) {
-                console.warn(`Job ${job.id} timed out, resetting to pending`);
-                job.status = 'pending';
-                job.startTime = null;
+        try {
+            // Process jobs
+            while (state.syncQueue.some(j => j.status === 'pending' || j.status === 'failed')) {
+                // Get next job
+                const job = state.syncQueue.find(j => j.status === 'pending' || j.status === 'failed');
+                
+                if (!job) break;
+                
+                // Check if too many retries
+                if (job.retries >= CONFIG.MAX_RETRIES) {
+                    console.log(`Job ${job.id} exceeded max retries`);
+                    job.status = 'failed_max_retries';
+                    debouncedSave();
+                    continue;
+                }
+                
+                // Start job
+                console.log(`Processing job: ${job.id} (${job.type}/${job.subreddit || 'N/A'})`);
+                job.status = 'processing';
+                job.startTime = Date.now();
                 job.retries++;
                 debouncedSave();
                 updateQueueStatus();
-                continue;
-            }
-            
-            try {
-                job.status = 'processing';
-                job.startTime = Date.now();
-                console.log(`Processing sync job: ${job.id}`);
-                debouncedSave();
-                updateQueueStatus(); // Update to show current feed name
+                updateSyncingStatus(); // Update status during processing
                 
-                let result;
-                if (job.type === 'fetch_subreddit' && job.subreddit) {
-                    result = await fetchFeedWithRetry('my', job.subreddit, job.retries);
-                } else if (job.type === 'fetch_popular') {
-                    result = await fetchFeedWithRetry('popular', null, job.retries);
-                }
+                // Execute job
+                const result = await executeJob(job);
                 
-                if (result && result.posts && result.posts.length > 0) {
-                    const feedKey = job.type === 'fetch_popular' ? 'popular' : 'my';
-                    const existingIds = new Set(state.feeds[feedKey].posts.map(p => p.id));
-                    const newPosts = result.posts.filter(p => !existingIds.has(p.id));
-                    
-                    if (newPosts.length > 0) {
-                        // Apply posts directly to feed instead of pending
-                        state.feeds[feedKey].posts.push(...newPosts);
-                        state.feeds[feedKey].posts = removeDuplicates(state.feeds[feedKey].posts).sort((a, b) => b.created_utc - a.created_utc);
-                        console.log(`Added ${newPosts.length} new posts to ${feedKey} feed`);
-                        
-                        // Trigger UI update
-                        if (state.current === feedKey) {
-                            renderPosts();
-                        }
-                    }
-                }
-                
-                job.status = 'completed';
-                job.startTime = null;
-                console.log(`Completed sync job: ${job.id}`);
-                
-            } catch (error) {
-                console.error(`Sync job ${job.id} failed:`, error);
-                job.retries++;
-                
-                if (job.retries >= CONFIG.MAX_RETRIES) {
-                    job.status = 'failed_max_retries';
-                    console.error(`Job ${job.id} failed after ${job.retries} retries`);
+                // Update job status
+                if (result.success) {
+                    console.log(`Job ${job.id} completed successfully`);
+                    job.status = 'completed';
                 } else {
+                    console.log(`Job ${job.id} failed: ${result.error}`);
                     job.status = 'failed';
-                    // Add delay before retry
-                    await new Promise(resolve => setTimeout(resolve, SYNC_CONFIG.RETRY_DELAY_MS * Math.pow(2, job.retries)));
                 }
+                
+                debouncedSave();
             }
             
-            debouncedSave();
-            updateQueueStatus();
+            // Remove completed jobs
+            state.syncQueue = state.syncQueue.filter(j => 
+                j.status !== 'completed' && j.status !== 'failed_max_retries'
+            );
             
-            await new Promise(resolve => setTimeout(resolve, CONFIG.JOB_DELAY_MS));
+            console.log(`Queue processing complete. Remaining jobs: ${state.syncQueue.length}`);
+            
+        } catch (error) {
+            console.error('Error in processSyncQueue:', error);
+        } finally {
+            // Always clean up, even on error
+            if (dot) dot.classList.remove('loading');
+            state.isProcessingQueue = false;
+            updateQueueStatus();
+            updateSyncingStatus(); // Clear syncing status
+            
+            // Save state after sync completes
+            saveState();
         }
         
-        // Remove completed jobs
-        state.syncQueue = state.syncQueue.filter(j => j.status !== 'completed');
-        debouncedSave();
+        // Check if this was initial fetch and feeds are still empty - auto apply
+        const totalCached = state.feeds.my.posts.length + state.feeds.popular.posts.length;
+        const totalPending = state.feeds.my.pending.posts.length + state.feeds.popular.pending.posts.length;
         
-        state.isProcessingQueue = false;
-        updateQueueStatus();
+        if (totalCached === 0 && totalPending > 0) {
+            // Auto-apply pending posts for initial fetch
+            console.log('Initial fetch complete - auto-applying posts');
+            window.applyPendingUpdates();
+        } else if (totalPending > 0) {
+            // Show new posts toast if there are pending posts
+            showNewPostsToast();
+        }
+    }
+
+    async function executeJob(job) {
+        try {
+            if (job.type === 'fetch_subreddit') {
+                const result = await fetchFeedWithRetry('subreddit', job.subreddit, job.retries - 1);
+                if (result.posts) {
+                    addPostsToPending(result.posts, 'my');
+                    return { success: true };
+                }
+                return { success: false, error: result.error };
+            } else if (job.type === 'fetch_popular') {
+                const result = await fetchFeedWithRetry('popular', null, job.retries - 1);
+                if (result.posts) {
+                    addPostsToPending(result.posts, 'popular');
+                    return { success: true };
+                }
+                return { success: false, error: result.error };
+            }
+            
+            return { success: false, error: 'Unknown job type' };
+        } catch (error) {
+            console.error('Job execution failed:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    function addPostsToPending(posts, feedType) {
+        const feed = state.feeds[feedType];
         
-        // Save state after sync completes
-        saveState();
+        // Filter out posts that already exist in main feed or pending
+        const existingIds = new Set([
+            ...feed.posts.map(p => p.id),
+            ...feed.pending.posts.map(p => p.id)
+        ]);
         
-        // Show success toast
-        showToast('Posts refreshed successfully!', { type: 'success', duration: 3000 });
+        const newPosts = posts.filter(p => !existingIds.has(p.id));
+        
+        if (newPosts.length > 0) {
+            feed.pending.posts = [...feed.pending.posts, ...newPosts];
+            feed.pending.count = feed.pending.posts.length;
+            debouncedSave();
+        }
     }
 
     async function fetchFeedWithRetry(feedType, subreddit = null, retryCount = 0) {
@@ -695,53 +725,112 @@
         }
     }
 
-    function showUpdateToast() {
+    function updateSyncingStatus() {
+        const status = document.getElementById('status');
+        if (!status) return;
+        
+        // Check if we're syncing and feeds are empty
+        const totalCached = state.feeds.my.posts.length + state.feeds.popular.posts.length;
+        const isSyncing = state.isProcessingQueue || state.syncQueue.some(j => 
+            j.status === 'processing' || j.status === 'pending'
+        );
+        
+        if (isSyncing && totalCached === 0 && state.current === 'my') {
+            status.textContent = 'Fetching new posts...';
+            status.style.display = 'block';
+        } else if (!isSyncing && totalCached === 0) {
+            status.textContent = '';
+            status.style.display = 'none';
+        }
+    }
+
+    function showNewPostsToast() {
         const myCount = state.feeds.my.pending.count;
         const popCount = state.feeds.popular.pending.count;
         const total = myCount + popCount;
         
         let message = '';
+        
         if (state.current === 'my' && myCount > 0) {
-            message = `${myCount} new post${myCount > 1 ? 's' : ''}`;
+            message = `${myCount}+ new post${myCount > 1 ? 's' : ''}`;
         } else if (state.current === 'popular' && popCount > 0) {
-            message = `${popCount} new post${popCount > 1 ? 's' : ''}`;
+            message = `${popCount}+ new post${popCount > 1 ? 's' : ''}`;
         } else if (total > 0) {
-            message = `${total} new post${total > 1 ? 's' : ''} available`;
+            message = `${total}+ new post${total > 1 ? 's' : ''}`;
         }
         
         if (message) {
-            showToast(message, {
-                type: 'update',
-                duration: 0,
-                position: 'top',
-                actions: [
-                    { label: 'View Updates', onClick: 'applyPendingUpdates' }
-                ]
-            });
+            // Remove existing toast first
+            const existing = document.getElementById('persistentToast');
+            if (existing) existing.remove();
+            
+            const toast = document.createElement('div');
+            toast.id = 'persistentToast';
+            toast.className = 'update-toast';
+            toast.style.cssText = `
+                position: fixed;
+                top: -100px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: #ff4500;
+                color: white;
+                padding: 12px 20px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                z-index: 1000;
+                transition: top 0.3s ease;
+                border-radius: 8px;
+                cursor: pointer;
+                font-weight: 500;
+                font-size: 14px;
+            `;
+            
+            toast.textContent = message;
+            toast.onclick = () => window.applyPendingUpdates();
+            
+            document.body.appendChild(toast);
+            
+            // Trigger animation
+            setTimeout(() => {
+                toast.style.top = '20px';
+            }, 10);
+            
+            state.newPostsToast = toast;
         }
     }
 
     window.applyPendingUpdates = function() {
         // Apply my feed updates
         if (state.feeds.my.pending.posts.length > 0) {
-            const allPosts = [...state.feeds.my.posts, ...state.feeds.my.pending.posts];
+            const allPosts = [...state.feeds.my.pending.posts, ...state.feeds.my.posts];
             state.feeds.my.posts = removeDuplicates(allPosts).sort((a, b) => b.created_utc - a.created_utc);
             state.feeds.my.pending = { posts: [], count: 0 };
         }
         
         // Apply popular feed updates
         if (state.feeds.popular.pending.posts.length > 0) {
-            const allPosts = [...state.feeds.popular.posts, ...state.feeds.popular.pending.posts];
+            const allPosts = [...state.feeds.popular.pending.posts, ...state.feeds.popular.posts];
             state.feeds.popular.posts = removeDuplicates(allPosts).sort((a, b) => b.created_utc - a.created_utc);
             state.feeds.popular.pending = { posts: [], count: 0 };
         }
         
         saveState();
-        cleanupOldPosts();
+        cleanupOldPostsByAge();
         renderPosts();
         renderSubredditFilter();
         
-        window.dismissToast();
+        // Dismiss toast with animation
+        const toast = document.getElementById('persistentToast');
+        if (toast) {
+            toast.style.top = '-100px';
+            setTimeout(() => {
+                toast.remove();
+                state.newPostsToast = null;
+            }, 300);
+        }
+        
+        // Scroll to top smoothly
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        
         showToast('Feed updated!', { type: 'success' });
     };
 
@@ -840,6 +929,47 @@
         console.log(`Removed ${removedIds.size} posts. New: ${getStorageUsagePercent().toFixed(1)}%`);
     }
 
+    function cleanupOldPostsByAge() {
+        const now = Date.now() / 1000; // Current time in seconds
+        const maxAge = CONFIG.MAX_POST_AGE_DAYS * 24 * 60 * 60; // Convert days to seconds
+        const bookmarkedIds = new Set(state.feeds.starred.posts.map(p => p.id));
+        
+        let removedCount = 0;
+        
+        // Clean My Feed
+        const originalMyCount = state.feeds.my.posts.length;
+        state.feeds.my.posts = state.feeds.my.posts.filter(post => {
+            const age = now - post.created_utc;
+            const isOld = age > maxAge;
+            const isBookmarked = bookmarkedIds.has(post.id);
+            
+            if (isOld && !isBookmarked) {
+                removedCount++;
+                return false;
+            }
+            return true;
+        });
+        
+        // Clean Popular Feed
+        const originalPopCount = state.feeds.popular.posts.length;
+        state.feeds.popular.posts = state.feeds.popular.posts.filter(post => {
+            const age = now - post.created_utc;
+            const isOld = age > maxAge;
+            const isBookmarked = bookmarkedIds.has(post.id);
+            
+            if (isOld && !isBookmarked) {
+                removedCount++;
+                return false;
+            }
+            return true;
+        });
+        
+        if (removedCount > 0) {
+            console.log(`Removed ${removedCount} posts older than ${CONFIG.MAX_POST_AGE_DAYS} days`);
+            saveState();
+        }
+    }
+
     function updateStorageStats() {
         const size = getLocalStorageSize();
         const percent = getStorageUsagePercent();
@@ -913,11 +1043,14 @@
         setupOnlineOfflineListeners();
         checkForUpdates();
         
-        // Process pending sync jobs
+        // Resume sync queue if needed
         if (navigator.onLine && state.syncQueue.length > 0) {
-            console.log(`Starting sync queue processing with ${state.syncQueue.length} jobs`);
+            console.log(`Resuming sync queue processing with ${state.syncQueue.length} jobs`);
             processSyncQueue();
         }
+        
+        // Show new posts toast if there are pending posts
+        showNewPostsToast();
     }
 
     // ============================================================================
@@ -1298,12 +1431,27 @@
     function getTextHTML(post) {
         if (!post.selftext) return '';
         
-        let html = post.selftext;
-        // Convert markdown links
-        html = html.replace(/\[([^\]]+)\]\(([^\)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-        html = esc(html).replace(/\n/g, '<br>');
+        let text = post.selftext;
         
-        return `<div class="post-text">${html}</div>`;
+        // Convert HTML anchor tags to clickable links
+        text = text.replace(/<a\s+href="([^"]+)"[^>]*>([^<]+)<\/a>/gi, '<a href="$1" target="_blank" rel="noopener">$2</a>');
+        
+        // Convert markdown links
+        text = text.replace(/\[([^\]]+)\]\(([^\)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+        
+        // Escape HTML (but preserve the links we just created)
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = text;
+        text = tempDiv.textContent || tempDiv.innerText;
+        
+        // Re-apply the link conversion after escaping
+        text = text.replace(/<a\s+href="([^"]+)"[^>]*>([^<]+)<\/a>/gi, '<a href="$1" target="_blank" rel="noopener">$2</a>');
+        text = text.replace(/\[([^\]]+)\]\(([^\)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+        
+        // Convert newlines to <br>
+        text = text.replace(/\n/g, '<br>');
+        
+        return `<div class="post-text">${text}</div>`;
     }
 
     function esc(str) {
@@ -1329,6 +1477,48 @@
     }
 
     // ============================================================================
+    // SCROLL TO TOP BUTTON
+    // ============================================================================
+    function createScrollToTopButton() {
+        const button = document.createElement('button');
+        button.id = 'scrollToTop';
+        button.innerHTML = '↑';
+        button.title = 'Scroll to top';
+        button.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 50px;
+            height: 50px;
+            border-radius: 25px;
+            background: #ff4500;
+            color: white;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            z-index: 999;
+            display: none;
+            transition: all 0.3s ease;
+        `;
+        
+        button.onclick = () => {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        };
+        
+        document.body.appendChild(button);
+        
+        // Show/hide button based on scroll position
+        window.addEventListener('scroll', () => {
+            if (window.scrollY > 300) {
+                button.style.display = 'block';
+            } else {
+                button.style.display = 'none';
+            }
+        });
+    }
+
+    // ============================================================================
     // SUBREDDIT MANAGEMENT
     // ============================================================================
     function renderSubreddits() {
@@ -1337,9 +1527,14 @@
         const blockedSection = document.getElementById('blockedSection');
         
         if (list) {
-            list.innerHTML = state.subreddits.length === 0 
+            // Sort subreddits A-Z
+            const sortedSubs = [...state.subreddits].sort((a, b) => 
+                a.toLowerCase().localeCompare(b.toLowerCase())
+            );
+            
+            list.innerHTML = sortedSubs.length === 0 
                 ? '<span style="color: #7c7c7c;">No subreddits added yet</span>'
-                : state.subreddits.map(sub => 
+                : sortedSubs.map(sub => 
                     `<span class="subreddit-tag" onclick="window.removeSubreddit('${sub}')">r/${sub} ×</span>`
                   ).join('');
         }
@@ -1349,7 +1544,13 @@
                 blockedSection.style.display = 'none';
             } else {
                 blockedSection.style.display = 'block';
-                blockedList.innerHTML = state.blocked.map(sub => 
+                
+                // Sort blocked subreddits A-Z
+                const sortedBlocked = [...state.blocked].sort((a, b) => 
+                    a.toLowerCase().localeCompare(b.toLowerCase())
+                );
+                
+                blockedList.innerHTML = sortedBlocked.map(sub => 
                     `<span class="subreddit-tag blocked" onclick="window.unblockSubreddit('${sub}')">r/${sub} ×</span>`
                 ).join('');
             }
@@ -1384,6 +1585,8 @@
             () => {
                 state.subreddits = state.subreddits.filter(s => s.toLowerCase() !== sub.toLowerCase());
                 state.feeds.my.posts = state.feeds.my.posts.filter(p => p.subreddit.toLowerCase() !== sub.toLowerCase());
+                state.feeds.my.pending.posts = state.feeds.my.pending.posts.filter(p => p.subreddit.toLowerCase() !== sub.toLowerCase());
+                state.feeds.my.pending.count = state.feeds.my.pending.posts.length;
                 
                 if (state.filter.toLowerCase() === sub.toLowerCase()) {
                     state.filter = 'all';
@@ -1412,16 +1615,10 @@
             showToast('You are offline. Updates queued for when connection is restored.', { type: 'info' });
             if (state.current === 'my') {
                 state.subreddits.forEach(sub => {
-                    const job = queueSyncJob('fetch_subreddit', sub);
-                    if (!job) {
-                        console.warn(`Failed to queue sync job for subreddit: ${sub}`);
-                    }
+                    queueSyncJob('fetch_subreddit', sub);
                 });
             } else if (state.current === 'popular') {
-                const job = queueSyncJob('fetch_popular');
-                if (!job) {
-                    console.warn('Failed to queue popular sync job');
-                }
+                queueSyncJob('fetch_popular');
             }
             return;
         }
@@ -1430,18 +1627,13 @@
         
         if (state.current === 'my') {
             state.subreddits.forEach(sub => {
-                const job = queueSyncJob('fetch_subreddit', sub);
-                if (!job) {
-                    console.warn(`Failed to queue sync job for subreddit: ${sub}`);
-                }
+                queueSyncJob('fetch_subreddit', sub);
             });
         } else if (state.current === 'popular') {
-            const job = queueSyncJob('fetch_popular');
-            if (!job) {
-                console.warn('Failed to queue popular sync job');
-            }
+            queueSyncJob('fetch_popular');
         }
         
+        // Start processing queue immediately
         processSyncQueue();
     }
 
@@ -1532,8 +1724,13 @@
         const isBlocked = state.blocked.some(s => s.toLowerCase() === subredditName.toLowerCase());
         
         if (followBtn) {
-            followBtn.textContent = isFollowing ? 'Following' : 'Follow';
-            followBtn.className = isFollowing ? 'popup-btn-follow following' : 'popup-btn-follow';
+            if (isFollowing) {
+                followBtn.textContent = 'Unfollow';
+                followBtn.className = 'popup-btn-follow following';
+            } else {
+                followBtn.textContent = 'Follow';
+                followBtn.className = 'popup-btn-follow';
+            }
         }
         
         if (blockBtn) {
@@ -1580,22 +1777,49 @@
     function toggleFollowSubreddit() {
         if (!currentPopupSubreddit) return;
         
-        if (state.subreddits.includes(currentPopupSubreddit)) {
-            state.subreddits = state.subreddits.filter(s => s !== currentPopupSubreddit);
+        const isFollowing = state.subreddits.some(s => s.toLowerCase() === currentPopupSubreddit.toLowerCase());
+        
+        if (isFollowing) {
+            // Unfollow
+            showConfirm(
+                `Unfollow r/${currentPopupSubreddit}? This will also remove all posts from this subreddit from your feed.`,
+                () => {
+                    state.subreddits = state.subreddits.filter(s => s.toLowerCase() !== currentPopupSubreddit.toLowerCase());
+                    state.feeds.my.posts = state.feeds.my.posts.filter(p => p.subreddit.toLowerCase() !== currentPopupSubreddit.toLowerCase());
+                    state.feeds.my.pending.posts = state.feeds.my.pending.posts.filter(p => p.subreddit.toLowerCase() !== currentPopupSubreddit.toLowerCase());
+                    state.feeds.my.pending.count = state.feeds.my.pending.posts.length;
+                    
+                    saveState();
+                    renderSubreddits();
+                    renderSubredditFilter();
+                    renderPosts();
+                    updateFeedTabsVisibility();
+                    
+                    const followBtn = document.getElementById('popupFollowBtn');
+                    if (followBtn) {
+                        followBtn.textContent = 'Follow';
+                        followBtn.className = 'popup-btn-follow';
+                    }
+                    
+                    showToast(`Unfollowed r/${currentPopupSubreddit}`, { type: 'success' });
+                }
+            );
         } else {
+            // Follow
             state.subreddits.push(currentPopupSubreddit);
-        }
-        
-        saveState();
-        renderSubreddits();
-        renderSubredditFilter();
-        updateFeedTabsVisibility();
-        
-        const followBtn = document.getElementById('popupFollowBtn');
-        const isFollowing = state.subreddits.includes(currentPopupSubreddit);
-        if (followBtn) {
-            followBtn.textContent = isFollowing ? 'Following' : 'Follow';
-            followBtn.className = isFollowing ? 'popup-btn-follow following' : 'popup-btn-follow';
+            saveState();
+            renderSubreddits();
+            renderSubredditFilter();
+            updateFeedTabsVisibility();
+            
+            const followBtn = document.getElementById('popupFollowBtn');
+            if (followBtn) {
+                followBtn.textContent = 'Unfollow';
+                followBtn.className = 'popup-btn-follow following';
+            }
+            
+            queueSyncJob('fetch_subreddit', currentPopupSubreddit);
+            processSyncQueue();
         }
     }
 
@@ -1692,10 +1916,7 @@
         renderSubredditFilter();
         
         state.subreddits.forEach(sub => {
-            const job = queueSyncJob('fetch_subreddit', sub);
-            if (!job) {
-                console.warn(`Failed to queue sync job for subreddit: ${sub}`);
-            }
+            queueSyncJob('fetch_subreddit', sub);
         });
         processSyncQueue();
     }
@@ -1762,9 +1983,13 @@
     // START APPLICATION
     // ============================================================================
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initializeApp);
+        document.addEventListener('DOMContentLoaded', () => {
+            initializeApp();
+            createScrollToTopButton();
+        });
     } else {
         initializeApp();
+        createScrollToTopButton();
     }
 
 })();
