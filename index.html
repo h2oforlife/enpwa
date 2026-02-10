@@ -28,7 +28,7 @@
             --text-secondary: #818384;
             --text-muted: #565758;
             --border-color: #343536;
-            --accent-color: #ff4500;
+            --accent-color: #666;
             --sidebar-bg: #1a1a1b;
             --post-bg: #1a1a1b;
             --input-bg: #272729;
@@ -45,6 +45,30 @@
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
             background: var(--bg-primary);
             color: var(--text-primary);
+        }
+
+        /* Scrollbar styles */
+        * {
+            scrollbar-width: thin;
+            scrollbar-color: var(--border-color) var(--bg-secondary);
+        }
+
+        *::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        *::-webkit-scrollbar-track {
+            background: var(--bg-secondary);
+        }
+
+        *::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 4px;
+        }
+
+        *::-webkit-scrollbar-thumb:hover {
+            background: var(--text-secondary);
         }
 
         .header {
@@ -707,6 +731,21 @@
             text-decoration: underline;
         }
 
+        .post-text-toggle {
+            background: none;
+            border: none;
+            color: var(--accent-color);
+            cursor: pointer;
+            padding: 4px 0;
+            font-weight: 600;
+            font-size: 14px;
+            margin-top: 8px;
+        }
+
+        .post-text-toggle:hover {
+            text-decoration: underline;
+        }
+
         .post-footer {
             padding: 8px 12px;
             display: flex;
@@ -736,7 +775,7 @@
 
         .feed-tabs {
             display: flex;
-            background: white;
+            background: var(--bg-secondary);
             margin: 4px 0 4px;
             border-radius: 4px;
             overflow: hidden;
@@ -755,7 +794,7 @@
             padding: 8px 16px;
             margin-bottom: 4px;
             border-radius: 4px;
-            background: white;
+            background: var(--bg-secondary);
             -webkit-overflow-scrolling: touch;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         }
@@ -769,11 +808,11 @@
         }
 
         .subreddit-filter::-webkit-scrollbar-track {
-            background: #ddd;
+            background: var(--border-color);
         }
 
         .subreddit-filter::-webkit-scrollbar-thumb {
-            background: #ff4500;
+            background: var(--accent-color);
             border-radius: 2px;
         }
 
@@ -781,13 +820,14 @@
             display: inline-block;
             padding: 6px 12px;
             margin-right: 8px;
-            background: white;
-            border: 2px solid #ddd;
+            background: var(--bg-secondary);
+            border: 2px solid var(--border-color);
             border-radius: 16px;
             font-size: 13px;
             font-weight: 600;
             cursor: pointer;
             transition: all 0.2s;
+            color: var(--text-primary);
         }
 
         .filter-chip:hover {
@@ -946,8 +986,8 @@
             text-align: center;
             font-size: 14px;
             font-weight: 700;
-            color: #7c7c7c;
-            background: white;
+            color: var(--text-secondary);
+            background: var(--bg-secondary);
             border: none;
             cursor: pointer;
             transition: all 0.2s;
@@ -955,12 +995,12 @@
         }
 
         .feed-tab:hover {
-            background: #f5f5f5;
+            background: var(--input-bg);
         }
 
         .feed-tab.active {
-            color: #ff4500;
-            border-bottom-color: #ff4500;
+            color: var(--accent-color);
+            border-bottom-color: var(--accent-color);
         }
 
         .error {
@@ -1184,7 +1224,7 @@
         </div>
         <div class="sidebar-content">
             <button id="refreshPostsBtn" style="width: 100%; margin-bottom: 16px; background: #ff4500;">Refresh Posts</button>
-            <input type="text" id="subredditInput" placeholder="Enter subreddit name" />
+            <input type="text" id="subredditInput" placeholder="Enter subreddit name" autocomplete="off" />
             <div class="button-row">
                 <button id="addSubredditBtn">Add Subreddit</button>
             </div>
@@ -1196,26 +1236,26 @@
             </div>
 
             <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
-                <h3 style="font-size: 14px; margin-bottom: 10px; color: #666;">Storage</h3>
-                <div id="storageStats" style="font-size: 12px; color: #666; line-height: 1.6;">
+                <h3 style="font-size: 14px; margin-bottom: 10px; color: var(--text-secondary);">Storage</h3>
+                <div id="storageStats" style="font-size: 12px; color: var(--text-secondary); line-height: 1.6;">
                     <div style="margin-bottom: 8px;">
                         <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
                             <span>Usage:</span>
                             <span id="storageUsage">0 KB / 5 MB</span>
                         </div>
-                        <div style="background: #eee; height: 6px; border-radius: 3px; overflow: hidden;">
-                            <div id="storageBar" style="background: #0079d3; height: 100%; width: 0%; transition: all 0.3s;"></div>
+                        <div style="background: var(--border-color); height: 6px; border-radius: 3px; overflow: hidden;">
+                            <div id="storageBar" style="background: var(--accent-color); height: 100%; width: 0%; transition: all 0.3s;"></div>
                         </div>
                     </div>
                     <div style="margin-bottom: 4px;">
                         Total Posts: <strong id="totalPosts">0</strong>
                     </div>
-                    <div id="postsPerSub" style="font-size: 11px; color: #999; max-height: 100px; overflow-y: auto;"></div>
+                    <div id="postsPerSub" style="font-size: 11px; color: var(--text-muted); max-height: 100px; overflow-y: auto;"></div>
                 </div>
             </div>
             
             <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
-                <button id="themeToggle" style="width: 100%; margin-bottom: 12px; background: #666; padding: 10px; border-radius: 4px; border: none; color: white; cursor: pointer; font-size: 14px;">🌙 Dark Mode</button>
+                <button id="themeToggle" style="width: 100%; margin-bottom: 12px; background: var(--input-bg); padding: 10px; border-radius: 4px; border: 1px solid var(--border-color); color: var(--text-primary); cursor: pointer; font-size: 14px;">🌙 Dark Mode</button>
             </div>
             
             <div style="margin-top: 12px;">
@@ -1270,6 +1310,19 @@
                     <div class="subreddit-popup-actions">
                         <button class="popup-btn-follow" id="popupFollowBtn">Follow</button>
                         <button class="popup-btn-block" id="popupBlockBtn">Block</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="subreddit-popup" id="userPopup">
+            <div class="subreddit-popup-content">
+                <button class="subreddit-popup-close" id="userPopupCloseBtn">×</button>
+                <div class="subreddit-popup-body">
+                    <div class="subreddit-popup-header" id="popupUserName"></div>
+                    <div class="subreddit-popup-info" style="margin: 12px 0;">Block this user to hide all their posts from your feeds.</div>
+                    <div class="subreddit-popup-actions">
+                        <button class="popup-btn-block" id="popupUserBlockBtn">Block User</button>
                     </div>
                 </div>
             </div>

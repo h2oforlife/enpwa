@@ -19,7 +19,8 @@
         JOB_DELAY_MS: 1000,
         MAX_SAFE_STORAGE: 8 * 1024 * 1024,
         MAX_POST_AGE_DAYS: 30, // Posts older than this will be deleted
-        POSTS_PER_PAGE: 25 // Pagination
+        POSTS_PER_PAGE: 25, // Pagination
+        MAX_POST_TEXT_LENGTH: 300 // Characters before "Read More"
     };
 
     // ============================================================================
@@ -33,6 +34,7 @@
         },
         subreddits: [],
         blocked: [],
+        blockedUsers: [],
         current: 'my',
         filter: 'all',
         rateLimitState: {
@@ -73,6 +75,9 @@
     let processingLockTimeout = null;
     let activeJobs = 0;
 
+    // Toast registry to prevent memory leaks
+    const activeToasts = new Map(); // id -> {element, timeout}
+
     // ============================================================================
     // ERROR HANDLING WRAPPER
     // ============================================================================
@@ -101,6 +106,7 @@
                 state.feeds.starred.posts = parsed.bookmarkedPosts || [];
                 state.subreddits = parsed.subreddits || [];
                 state.blocked = parsed.blockedSubreddits || [];
+                state.blockedUsers = parsed.blockedUsers || [];
                 state.current = parsed.currentFeed || 'my';
                 state.syncQueue = parsed.syncQueue || [];
                 state.updateAvailable = parsed.updateAvailable || false;
@@ -200,6 +206,7 @@
                 bookmarkedPosts: state.feeds.starred.posts,
                 subreddits: state.subreddits,
                 blockedSubreddits: state.blocked,
+                blockedUsers: state.blockedUsers,
                 currentFeed: state.current,
                 rateLimitState: state.rateLimitState,
                 syncQueue: state.syncQueue,
@@ -248,24 +255,25 @@
             duration = 3000,
             actions = [],
             position = 'bottom',
-            persistent = false
+            persistent = false,
+            id = null
         } = options;
         
-        // Remove existing toast of same type if any
-        const existingId = type === 'update' ? 'updateToast' : (persistent ? 'persistentToast' : null);
-        if (existingId) {
-            const existing = document.getElementById(existingId);
-            if (existing) existing.remove();
-        } else if (!persistent) {
-            const existing = document.querySelector('.toast-message:not(#persistentToast)');
-            if (existing) existing.remove();
+        const toastId = id || (type === 'update' ? 'updateToast' : (persistent ? 'persistentToast' : `toast-${Date.now()}`));
+        
+        // Clean up existing toast with same ID
+        if (activeToasts.has(toastId)) {
+            const existing = activeToasts.get(toastId);
+            clearTimeout(existing.timeout);
+            existing.element.remove();
+            activeToasts.delete(toastId);
         }
         
         const toast = document.createElement('div');
         
         if ((type === 'update' || persistent) && actions.length > 0) {
             // Update toast (top, with actions)
-            toast.id = persistent ? 'persistentToast' : 'updateToast';
+            toast.id = toastId;
             toast.className = 'update-toast';
             
             const actionsHtml = actions.map(action => 
@@ -286,6 +294,9 @@
             if (persistent) {
                 state.newPostsToast = toast;
             }
+            
+            // Register without timeout for persistent toasts
+            activeToasts.set(toastId, { element: toast, timeout: null });
         } else {
             // Regular toast (bottom, auto-dismiss)
             toast.className = `toast-message toast-${type}`;
@@ -295,10 +306,15 @@
             setTimeout(() => toast.classList.add('visible'), 10);
             
             if (duration > 0) {
-                setTimeout(() => {
+                const timeoutId = setTimeout(() => {
                     toast.classList.remove('visible');
-                    setTimeout(() => toast.remove(), 300);
+                    setTimeout(() => {
+                        toast.remove();
+                        activeToasts.delete(toastId);
+                    }, 300);
                 }, duration);
+                
+                activeToasts.set(toastId, { element: toast, timeout: timeoutId });
             }
         }
         
@@ -306,15 +322,29 @@
     }
 
     window.dismissToast = function(toastId) {
-        const toast = document.getElementById(toastId || 'updateToast');
-        if (toast) {
-            toast.classList.remove('visible');
-            setTimeout(() => toast.remove(), 300);
+        if (activeToasts.has(toastId)) {
+            const { element, timeout } = activeToasts.get(toastId);
+            if (timeout) clearTimeout(timeout);
+            element.classList.remove('visible');
+            setTimeout(() => {
+                element.remove();
+                activeToasts.delete(toastId);
+            }, 300);
+            
             if (toastId === 'persistentToast') {
                 state.newPostsToast = null;
             }
         }
     };
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', () => {
+        activeToasts.forEach(({ element, timeout }) => {
+            if (timeout) clearTimeout(timeout);
+            element.remove();
+        });
+        activeToasts.clear();
+    });
 
     // ============================================================================
     // CONFIRMATION DIALOGS
@@ -1203,6 +1233,15 @@
         if (popupBlock) popupBlock.onclick = toggleBlockSubreddit;
         if (popup) popup.onclick = (e) => e.target === popup && closeSubredditPopup();
         
+        // User popup
+        const userPopupClose = document.getElementById('userPopupCloseBtn');
+        const userPopupBlock = document.getElementById('popupUserBlockBtn');
+        const userPopup = document.getElementById('userPopup');
+        
+        if (userPopupClose) userPopupClose.onclick = closeUserPopup;
+        if (userPopupBlock) userPopupBlock.onclick = toggleBlockUser;
+        if (userPopup) userPopup.onclick = (e) => e.target === userPopup && closeUserPopup();
+        
         // Gallery navigation - event delegation
         document.addEventListener('click', handleGalleryClick);
     }
@@ -1474,6 +1513,9 @@
                 : posts.filter(p => !state.blocked.some(b => b.toLowerCase() === p.subreddit.toLowerCase()));
         }
         
+        // Filter blocked users globally
+        posts = posts.filter(p => !state.blockedUsers.some(u => u.toLowerCase() === p.author.toLowerCase()));
+        
         // Check if we're syncing
         const isSyncing = state.isProcessingQueue || state.syncQueue.some(j => 
             j.status === 'processing' || j.status === 'pending'
@@ -1548,7 +1590,7 @@
             <div class="post">
                 <div class="post-header">
                     <span class="subreddit-name" onclick="window.openSubredditPopup('${esc(post.subreddit)}')">r/${esc(post.subreddit)}</span>
-                    • Posted by <span class="post-author">u/${esc(post.author)}</span>
+                    • Posted by <span class="post-author" onclick="window.openUserPopup('${esc(post.author)}')" style="cursor: pointer; text-decoration: underline;">u/${esc(post.author)}</span>
                     • ${formatTime(post.created_utc)}
                     <button class="bookmark-btn ${isBookmarked ? 'bookmarked' : ''}" 
                             onclick="window.toggleBookmark('${post.id}')" 
@@ -1662,8 +1704,39 @@
         // Convert newlines to <br>
         text = text.replace(/\n/g, '<br>');
         
+        // Check if text is too long
+        if (text.length > CONFIG.MAX_POST_TEXT_LENGTH) {
+            const preview = text.substring(0, CONFIG.MAX_POST_TEXT_LENGTH) + '...';
+            
+            return `
+                <div class="post-text">
+                    <div class="post-text-preview">${preview}</div>
+                    <div class="post-text-full" style="display: none;">${text}</div>
+                    <button class="post-text-toggle" onclick="window.togglePostText(this)">Read More</button>
+                </div>
+            `;
+        }
+        
         return `<div class="post-text">${text}</div>`;
     }
+
+    window.togglePostText = function(button) {
+        const container = button.parentElement;
+        const preview = container.querySelector('.post-text-preview');
+        const full = container.querySelector('.post-text-full');
+        
+        if (full.style.display === 'none') {
+            // Expand
+            preview.style.display = 'none';
+            full.style.display = 'block';
+            button.textContent = 'Show Less';
+        } else {
+            // Collapse
+            preview.style.display = 'block';
+            full.style.display = 'none';
+            button.textContent = 'Read More';
+        }
+    };
 
     function esc(str) {
         const div = document.createElement('div');
@@ -1859,6 +1932,7 @@
             exportDate: new Date().toISOString(),
             subreddits: state.subreddits,
             blocked: state.blocked,
+            blockedUsers: state.blockedUsers,
             starredPosts: state.feeds.starred.posts,
             settings: {
                 theme: localStorage.getItem('theme') || 'light'
@@ -1912,12 +1986,20 @@
                     const normalizedBlocked = state.blocked.map(s => s.toLowerCase());
                     const newBlocked = data.blocked.filter(sub => !normalizedBlocked.includes(sub.toLowerCase()));
                     state.blocked = [...state.blocked, ...newBlocked];
-                    imported.push(`${newBlocked.length} blocked`);
+                    imported.push(`${newBlocked.length} blocked subs`);
                     
                     // Rebuild filtered cache
                     state.feeds.popular.filtered = state.feeds.popular.posts.filter(p => 
                         !state.blocked.some(b => b.toLowerCase() === p.subreddit.toLowerCase())
                     );
+                }
+                
+                // Import blocked users
+                if (data.blockedUsers && Array.isArray(data.blockedUsers)) {
+                    const normalizedBlockedUsers = state.blockedUsers.map(u => u.toLowerCase());
+                    const newBlockedUsers = data.blockedUsers.filter(u => !normalizedBlockedUsers.includes(u.toLowerCase()));
+                    state.blockedUsers = [...state.blockedUsers, ...newBlockedUsers];
+                    imported.push(`${newBlockedUsers.length} blocked users`);
                 }
                 
                 // Import starred posts
@@ -2135,6 +2217,68 @@
             );
         }
     }
+
+    // ============================================================================
+    // USER POPUP
+    // ============================================================================
+    let currentPopupUser = null;
+
+    window.openUserPopup = function(username) {
+        currentPopupUser = username;
+        const popup = document.getElementById('userPopup');
+        const nameEl = document.getElementById('popupUserName');
+        const blockBtn = document.getElementById('popupUserBlockBtn');
+        
+        if (!popup) return;
+        
+        nameEl.textContent = `u/${username}`;
+        
+        const isBlocked = state.blockedUsers.some(u => u.toLowerCase() === username.toLowerCase());
+        if (blockBtn) {
+            blockBtn.textContent = isBlocked ? 'Unblock User' : 'Block User';
+            blockBtn.className = isBlocked ? 'popup-btn-block blocked' : 'popup-btn-block';
+        }
+        
+        popup.classList.add('active');
+    };
+
+    window.closeUserPopup = function() {
+        const popup = document.getElementById('userPopup');
+        if (popup) popup.classList.remove('active');
+        currentPopupUser = null;
+    };
+
+    window.toggleBlockUser = function() {
+        if (!currentPopupUser) return;
+        
+        const isBlocked = state.blockedUsers.some(u => u.toLowerCase() === currentPopupUser.toLowerCase());
+        
+        if (isBlocked) {
+            state.blockedUsers = state.blockedUsers.filter(u => u.toLowerCase() !== currentPopupUser.toLowerCase());
+            saveState();
+            renderPosts();
+            
+            const blockBtn = document.getElementById('popupUserBlockBtn');
+            if (blockBtn) {
+                blockBtn.textContent = 'Block User';
+                blockBtn.className = 'popup-btn-block';
+            }
+            
+            showToast(`Unblocked u/${currentPopupUser}`, { type: 'success' });
+        } else {
+            state.blockedUsers.push(currentPopupUser);
+            saveState();
+            renderPosts();
+            
+            const blockBtn = document.getElementById('popupUserBlockBtn');
+            if (blockBtn) {
+                blockBtn.textContent = 'Unblock User';
+                blockBtn.className = 'popup-btn-block blocked';
+            }
+            
+            showToast(`Blocked u/${currentPopupUser}`, { type: 'success' });
+        }
+    };
 
     // ============================================================================
     // WELCOME SCREEN
