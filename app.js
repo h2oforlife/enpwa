@@ -18,7 +18,8 @@
         CLEANUP_THRESHOLD: 90, // Only cleanup when storage is 90%+ full
         JOB_DELAY_MS: 1000,
         MAX_SAFE_STORAGE: 8 * 1024 * 1024,
-        MAX_POST_AGE_DAYS: 30 // Posts older than this will be deleted
+        MAX_POST_AGE_DAYS: 30, // Posts older than this will be deleted
+        POSTS_PER_PAGE: 25 // Pagination
     };
 
     // ============================================================================
@@ -26,9 +27,9 @@
     // ============================================================================
     const state = {
         feeds: {
-            my: { posts: [], pending: { posts: [], count: 0 }, lastFetch: {} },
-            popular: { posts: [], pending: { posts: [], count: 0 }, lastFetch: {} },
-            starred: { posts: [] }
+            my: { posts: [], pending: { posts: [], count: 0 }, lastFetch: {}, currentPage: 1 },
+            popular: { posts: [], pending: { posts: [], count: 0 }, lastFetch: {}, currentPage: 1, filtered: [] },
+            starred: { posts: [], currentPage: 1 }
         },
         subreddits: [],
         blocked: [],
@@ -45,7 +46,8 @@
         countrySuggestions: [],
         selectedCountry: null,
         storageQuota: 5 * 1024 * 1024,
-        newPostsToast: null // Reference to persistent toast
+        newPostsToast: null, // Reference to persistent toast
+        updateAvailable: false // Track update availability persistently
     };
 
     // Periodic task intervals
@@ -101,6 +103,7 @@
                 state.blocked = parsed.blockedSubreddits || [];
                 state.current = parsed.currentFeed || 'my';
                 state.syncQueue = parsed.syncQueue || [];
+                state.updateAvailable = parsed.updateAvailable || false;
                 
                 // Load pending posts
                 state.feeds.my.pending = parsed.myPending || { posts: [], count: 0 };
@@ -109,6 +112,11 @@
                 // Load lastFetch tracking
                 state.feeds.my.lastFetch = parsed.myLastFetch || {};
                 state.feeds.popular.lastFetch = parsed.popularLastFetch || {};
+                
+                // Build filtered cache for popular feed
+                state.feeds.popular.filtered = state.feeds.popular.posts.filter(p => 
+                    !state.blocked.some(b => b.toLowerCase() === p.subreddit.toLowerCase())
+                );
                 
                 // Fix rate limit state corruption
                 if (parsed.rateLimitState) {
@@ -198,7 +206,8 @@
                 myPending: state.feeds.my.pending,
                 popularPending: state.feeds.popular.pending,
                 myLastFetch: state.feeds.my.lastFetch,
-                popularLastFetch: state.feeds.popular.lastFetch
+                popularLastFetch: state.feeds.popular.lastFetch,
+                updateAvailable: state.updateAvailable
             };
             
             localStorage.setItem('appState', JSON.stringify(toSave));
@@ -582,16 +591,36 @@
             saveState();
         }
         
-        // Check if this was initial fetch and feeds are still empty - auto apply
-        const totalCached = state.feeds.my.posts.length + state.feeds.popular.posts.length;
-        const totalPending = state.feeds.my.pending.posts.length + state.feeds.popular.pending.posts.length;
+        // Check if this was initial fetch - auto apply pending posts for empty feeds
+        if (state.feeds.my.posts.length === 0 && state.feeds.my.pending.posts.length > 0) {
+            console.log('Initial My Feed fetch complete - auto-applying posts');
+            const allPosts = [...state.feeds.my.pending.posts, ...state.feeds.my.posts];
+            state.feeds.my.posts = removeDuplicates(allPosts).sort((a, b) => b.created_utc - a.created_utc);
+            state.feeds.my.pending = { posts: [], count: 0 };
+            saveState();
+            if (state.current === 'my') renderPosts();
+        }
         
-        if (totalCached === 0 && totalPending > 0) {
-            // Auto-apply pending posts for initial fetch
-            console.log('Initial fetch complete - auto-applying posts');
-            window.applyPendingUpdates();
-        } else if (totalPending > 0) {
-            // Show new posts toast if there are pending posts
+        if (state.feeds.popular.posts.length === 0 && state.feeds.popular.pending.posts.length > 0) {
+            console.log('Initial Popular feed fetch complete - auto-applying posts');
+            const allPosts = [...state.feeds.popular.pending.posts, ...state.feeds.popular.posts];
+            state.feeds.popular.posts = removeDuplicates(allPosts).sort((a, b) => b.created_utc - a.created_utc);
+            state.feeds.popular.pending = { posts: [], count: 0 };
+            // Update filtered cache
+            state.feeds.popular.filtered = state.feeds.popular.posts.filter(p => 
+                !state.blocked.some(b => b.toLowerCase() === p.subreddit.toLowerCase())
+            );
+            saveState();
+            if (state.current === 'popular') renderPosts();
+        }
+        
+        // Show toast for non-empty feeds with pending posts
+        const myHasPosts = state.feeds.my.posts.length > 0;
+        const popHasPosts = state.feeds.popular.posts.length > 0;
+        const myHasPending = state.feeds.my.pending.posts.length > 0;
+        const popHasPending = state.feeds.popular.pending.posts.length > 0;
+        
+        if ((myHasPosts && myHasPending) || (popHasPosts && popHasPending)) {
             showNewPostsToast();
         }
     }
@@ -744,16 +773,16 @@
         const status = document.getElementById('status');
         if (!status) return;
         
-        // Check if we're syncing and feeds are empty
-        const totalCached = state.feeds.my.posts.length + state.feeds.popular.posts.length;
+        // Check if we're syncing and current feed is empty
+        const currentFeed = state.feeds[state.current];
         const isSyncing = state.isProcessingQueue || state.syncQueue.some(j => 
             j.status === 'processing' || j.status === 'pending'
         );
         
-        if (isSyncing && totalCached === 0 && state.current === 'my') {
+        if (isSyncing && currentFeed.posts.length === 0) {
             status.textContent = 'Fetching new posts...';
             status.style.display = 'block';
-        } else if (!isSyncing && totalCached === 0) {
+        } else {
             status.textContent = '';
             status.style.display = 'none';
         }
@@ -826,6 +855,11 @@
             const allPosts = [...state.feeds.popular.pending.posts, ...state.feeds.popular.posts];
             state.feeds.popular.posts = removeDuplicates(allPosts).sort((a, b) => b.created_utc - a.created_utc);
             state.feeds.popular.pending = { posts: [], count: 0 };
+            
+            // Rebuild filtered cache
+            state.feeds.popular.filtered = state.feeds.popular.posts.filter(p => 
+                !state.blocked.some(b => b.toLowerCase() === p.subreddit.toLowerCase())
+            );
         }
         
         saveState();
@@ -1068,6 +1102,11 @@
         registerServiceWorker();
         updateFeedTabsVisibility();
         
+        // Show update notification if previously detected
+        if (state.updateAvailable) {
+            showUpdateNotification();
+        }
+        
         // Show UI
         if (state.subreddits.length === 0) {
             showWelcomeScreen();
@@ -1277,6 +1316,8 @@
     }
 
     function showUpdateNotification() {
+        state.updateAvailable = true;
+        debouncedSave();
         const notification = document.getElementById('updateNotification');
         if (notification) notification.classList.add('active');
     }
@@ -1286,6 +1327,9 @@
         try {
             localStorage.setItem('lastUpdateTime', JSON.stringify(now.toISOString()));
         } catch (e) {}
+        
+        state.updateAvailable = false;
+        debouncedSave();
         
         if (navigator.serviceWorker.controller) {
             navigator.serviceWorker.controller.postMessage({ type: 'SKIP_WAITING' });
@@ -1317,6 +1361,12 @@
     function switchFeed(feed) {
         state.current = feed;
         state.filter = 'all';
+        
+        // Reset pagination when switching feeds
+        state.feeds.my.currentPage = 1;
+        state.feeds.popular.currentPage = 1;
+        state.feeds.starred.currentPage = 1;
+        
         debouncedSave();
         
         const tabs = ['myFeedTab', 'popularFeedTab', 'starredFeedTab'];
@@ -1368,6 +1418,7 @@
 
     function setActiveFilter(filter) {
         state.filter = filter;
+        state.feeds[state.current].currentPage = 1; // Reset pagination on filter change
         document.querySelectorAll('.filter-chip').forEach(chip => {
             chip.classList.toggle('active', chip.dataset.filter === filter);
         });
@@ -1386,9 +1437,11 @@
             posts = posts.filter(p => p.subreddit.toLowerCase() === state.filter.toLowerCase());
         }
         
-        // Filter blocked subreddits for Popular
+        // Use cached filtered posts for Popular
         if (state.current === 'popular') {
-            posts = posts.filter(p => !state.blocked.some(b => b.toLowerCase() === p.subreddit.toLowerCase()));
+            posts = state.feeds.popular.filtered.length > 0 
+                ? state.feeds.popular.filtered 
+                : posts.filter(p => !state.blocked.some(b => b.toLowerCase() === p.subreddit.toLowerCase()));
         }
         
         // Check if we're syncing
@@ -1397,12 +1450,20 @@
         );
         
         if (posts.length === 0) {
-            if (status) status.textContent = '';
-            
-            // Don't show "No posts yet" if we're actively syncing
-            if (isSyncing && state.current === 'my') {
+            // Show "Fetching new posts..." in status div when syncing
+            if (isSyncing) {
+                if (status) {
+                    status.textContent = 'Fetching new posts...';
+                    status.style.display = 'block';
+                }
                 container.innerHTML = ''; // Empty container while syncing
                 return;
+            }
+            
+            // Clear status when not syncing
+            if (status) {
+                status.textContent = '';
+                status.style.display = 'none';
             }
             
             const messages = {
@@ -1414,8 +1475,41 @@
             return;
         }
         
-        if (status) status.textContent = '';
-        container.innerHTML = posts.map(createPostHTML).join('');
+        if (status) {
+            status.textContent = '';
+            status.style.display = 'none';
+        }
+        
+        // Pagination - render only visible posts
+        const currentPage = state.feeds[state.current].currentPage || 1;
+        const visiblePosts = posts.slice(0, currentPage * CONFIG.POSTS_PER_PAGE);
+        
+        container.innerHTML = visiblePosts.map(createPostHTML).join('');
+        
+        // Add "Load More" button if there are more posts
+        if (visiblePosts.length < posts.length) {
+            const loadMoreBtn = document.createElement('button');
+            loadMoreBtn.className = 'load-more-btn';
+            loadMoreBtn.textContent = `Load More (${posts.length - visiblePosts.length} remaining)`;
+            loadMoreBtn.onclick = () => {
+                state.feeds[state.current].currentPage = (state.feeds[state.current].currentPage || 1) + 1;
+                renderPosts();
+                window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+            };
+            loadMoreBtn.style.cssText = `
+                display: block;
+                margin: 20px auto;
+                padding: 12px 24px;
+                background: #ff4500;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-size: 14px;
+                font-weight: 500;
+                cursor: pointer;
+            `;
+            container.appendChild(loadMoreBtn);
+        }
     }
 
     function createPostHTML(post) {
@@ -1658,6 +1752,12 @@
 
     window.unblockSubreddit = function(sub) {
         state.blocked = state.blocked.filter(s => s.toLowerCase() !== sub.toLowerCase());
+        
+        // Update filtered cache for popular feed
+        state.feeds.popular.filtered = state.feeds.popular.posts.filter(p => 
+            !state.blocked.some(b => b.toLowerCase() === p.subreddit.toLowerCase())
+        );
+        
         saveState();
         renderSubreddits();
         renderPosts();
@@ -1880,6 +1980,12 @@
         
         if (isBlocked) {
             state.blocked = state.blocked.filter(s => s !== currentPopupSubreddit);
+            
+            // Update filtered cache for popular feed
+            state.feeds.popular.filtered = state.feeds.popular.posts.filter(p => 
+                !state.blocked.some(b => b.toLowerCase() === p.subreddit.toLowerCase())
+            );
+            
             saveState();
             renderSubreddits();
             renderPosts();
@@ -1896,6 +2002,12 @@
                 `Block r/${currentPopupSubreddit}? Posts from this subreddit will be hidden from your Popular feed.`,
                 () => {
                     state.blocked.push(currentPopupSubreddit);
+                    
+                    // Update filtered cache for popular feed
+                    state.feeds.popular.filtered = state.feeds.popular.posts.filter(p => 
+                        !state.blocked.some(b => b.toLowerCase() === p.subreddit.toLowerCase())
+                    );
+                    
                     saveState();
                     renderSubreddits();
                     renderPosts();
