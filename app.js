@@ -442,6 +442,93 @@
         }
     }
 
+    // ============================================================================
+    // IMAGE OPTIMIZATION STRATEGY
+    // ============================================================================
+    /*
+    PLAN FOR IMAGE RESIZING AND COMPRESSION:
+    
+    1. TARGET QUALITY:
+       - Max width: 1280px (720p equivalent)
+       - Quality: 75-85% JPEG compression
+       - Format: Convert to WebP where supported (better compression)
+       - Estimated savings: 60-70% file size reduction
+    
+    2. WHEN TO OPTIMIZE:
+       - On fetch: Process images before caching
+       - Use Canvas API for client-side resizing
+       - Compress using canvas.toBlob() with quality parameter
+    
+    3. IMPLEMENTATION APPROACH:
+       
+       async function optimizeImage(imageUrl) {
+           return new Promise((resolve) => {
+               const img = new Image();
+               img.crossOrigin = 'anonymous';
+               img.onload = () => {
+                   const canvas = document.createElement('canvas');
+                   const ctx = canvas.getContext('2d');
+                   
+                   // Calculate new dimensions (max 1280px width)
+                   let width = img.width;
+                   let height = img.height;
+                   const maxWidth = 1280;
+                   
+                   if (width > maxWidth) {
+                       height = (height * maxWidth) / width;
+                       width = maxWidth;
+                   }
+                   
+                   canvas.width = width;
+                   canvas.height = height;
+                   ctx.drawImage(img, 0, 0, width, height);
+                   
+                   // Convert to blob with compression
+                   canvas.toBlob(
+                       (blob) => {
+                           const reader = new FileReader();
+                           reader.onloadend = () => resolve(reader.result);
+                           reader.readAsDataURL(blob);
+                       },
+                       'image/webp', // or 'image/jpeg' for fallback
+                       0.80 // 80% quality
+                   );
+               };
+               img.onerror = () => resolve(imageUrl); // Fallback to original
+               img.src = imageUrl;
+           });
+       }
+    
+    4. WHERE TO INTEGRATE:
+       - Modify stripPostData() to process gallery images
+       - Add optimization step before storing in state.feeds
+       - Store both original URL and optimized data URL
+       - Use optimized version for display, original for full-quality view
+    
+    5. STORAGE CONSIDERATIONS:
+       - Base64 data URLs are ~33% larger than binary
+       - But compression gains offset this
+       - Net result: Still 40-50% total savings
+       - Can store ~2x more images in same space
+    
+    6. PROGRESSIVE ENHANCEMENT:
+       - Try WebP first, fallback to JPEG
+       - Skip optimization if image already small (<200KB)
+       - Add loading indicator during optimization
+       - Cache optimization results to avoid reprocessing
+    
+    7. FUTURE IMPROVEMENTS:
+       - Use IndexedDB for binary blob storage (no Base64 overhead)
+       - Implement lazy loading with intersection observer
+       - Add user setting for quality preference
+       - Background worker for image processing
+    
+    VIDEOS:
+       - Keep current approach (no caching, stream only)
+       - Videos are too large to cache effectively
+       - Reddit video URLs are already optimized
+    */
+
     function stripPostData(post) {
         const result = {
             id: post.id,
@@ -854,7 +941,7 @@
                 top: -100px;
                 left: 50%;
                 transform: translateX(-50%);
-                background: #ff4500;
+                background: var(--accent-color);
                 color: white;
                 padding: 12px 20px;
                 box-shadow: 0 4px 12px rgba(0,0,0,0.3);
@@ -1579,7 +1666,7 @@
                 display: block;
                 margin: 20px auto;
                 padding: 12px 24px;
-                background: #ff4500;
+                background: var(--accent-color);
                 color: white;
                 border: none;
                 border-radius: 4px;
@@ -1786,7 +1873,7 @@
             width: 50px;
             height: 50px;
             border-radius: 25px;
-            background: #ff4500;
+            background: var(--accent-color);
             color: white;
             border: none;
             font-size: 24px;
@@ -1875,11 +1962,16 @@
     }
 
     window.unblockUser = function(username) {
-        state.blockedUsers = state.blockedUsers.filter(u => u.toLowerCase() !== username.toLowerCase());
-        saveState();
-        renderSubreddits();
-        renderPosts();
-        showToast(`Unblocked u/${username}`, { type: 'success' });
+        showConfirm(
+            `Unblock u/${username}? Posts from this user will appear again in your feeds.`,
+            () => {
+                state.blockedUsers = state.blockedUsers.filter(u => u.toLowerCase() !== username.toLowerCase());
+                saveState();
+                renderSubreddits();
+                renderPosts();
+                showToast(`Unblocked u/${username}`, { type: 'success' });
+            }
+        );
     };
 
     function addSubreddit() {
@@ -1928,17 +2020,22 @@
     };
 
     window.unblockSubreddit = function(sub) {
-        state.blocked = state.blocked.filter(s => s.toLowerCase() !== sub.toLowerCase());
-        
-        // Update filtered cache for popular feed
-        state.feeds.popular.filtered = state.feeds.popular.posts.filter(p => 
-            !state.blocked.some(b => b.toLowerCase() === p.subreddit.toLowerCase())
+        showConfirm(
+            `Unblock r/${sub}? Posts from this subreddit will appear again in your Popular feed.`,
+            () => {
+                state.blocked = state.blocked.filter(s => s.toLowerCase() !== sub.toLowerCase());
+                
+                // Update filtered cache for popular feed
+                state.feeds.popular.filtered = state.feeds.popular.posts.filter(p => 
+                    !state.blocked.some(b => b.toLowerCase() === p.subreddit.toLowerCase())
+                );
+                
+                saveState();
+                renderSubreddits();
+                renderPosts();
+                showToast(`Unblocked r/${sub}`, { type: 'success' });
+            }
         );
-        
-        saveState();
-        renderSubreddits();
-        renderPosts();
-        showToast(`Unblocked r/${sub}`, { type: 'success' });
     };
 
     function refreshPosts() {
@@ -2100,7 +2197,7 @@
         infoEl.textContent = 'Loading...';
         iconEl.style.display = 'none';
         bannerEl.style.backgroundImage = '';
-        bannerEl.style.background = 'linear-gradient(to bottom, #ff4500, rgba(255, 69, 0, 0))';
+        bannerEl.style.background = 'linear-gradient(to bottom, var(--accent-color), rgba(255, 69, 0, 0))';
         
         const isFollowing = state.subreddits.some(s => s.toLowerCase() === subredditName.toLowerCase());
         const isBlocked = state.blocked.some(s => s.toLowerCase() === subredditName.toLowerCase());

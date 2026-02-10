@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="var(--accent-color)">
+    <meta name="theme-color" content="#ff4500">
     <title>Emergency News PWA</title>
     <link rel="manifest" href="./manifest.json">
     <style>
@@ -14,7 +14,9 @@
             --text-secondary: #666;
             --text-muted: #999;
             --border-color: #eee;
-            --accent-color: var(--accent-color);
+            --accent-color: #ff4500;
+            --primary-color: #ff4500;
+            --warning-color: var(--warning-color);
             --sidebar-bg: #ffffff;
             --post-bg: #ffffff;
             --input-bg: #f6f7f8;
@@ -22,15 +24,18 @@
         }
 
         [data-theme="dark"] {
-            --bg-primary: #1a1a1b;
+            --bg-primary: #0E1113;
             --bg-secondary: #272729;
             --text-primary: #d7dadc;
             --text-secondary: #818384;
             --text-muted: #565758;
             --border-color: #343536;
-            --accent-color: #666;
+            --accent-color: #2a2a2a;
+            --primary-color: #2a2a2a;
+            --tabs-color: #818384;
+            --warning-color: #8b4545;
             --sidebar-bg: #1a1a1b;
-            --post-bg: #1a1a1b;
+            --post-bg: #0E1113;
             --input-bg: #272729;
             --input-border: #343536;
         }
@@ -72,7 +77,7 @@
         }
 
         .header {
-            background: var(--accent-color);
+            background: var(--primary-color);
             color: white;
             padding: 12px 16px;
             position: sticky;
@@ -85,8 +90,9 @@
         }
 
         .header h1 {
-            font-size: 20px;
-            font-weight: 500;
+            font-family: 'Montserrat', 'Roboto', sans-serif;
+            font-weight: 700;
+            font-size: 24px;
         }
 
         .header-right {
@@ -150,7 +156,7 @@
         }
 
         .status-dot.offline {
-            background: #f44336;
+            background: var(--warning-color);
         }
 
         .status-dot.loading {
@@ -261,7 +267,7 @@
         }
 
         .toast-message.toast-error {
-            background: #f44336;
+            background: var(--warning-color);
         }
 
         .toast-message.toast-info {
@@ -387,7 +393,7 @@
         }
 
         .sidebar-header {
-            background: var(--accent-color);
+            background: var(--primary-color);
             color: white;
             padding: 16px;
             font-size: 18px;
@@ -451,7 +457,7 @@
         }
 
         .sidebar-content button {
-            background: #0079d3;
+            background: var(--accent-color);
             color: white;
             border: none;
             padding: 8px 16px;
@@ -462,17 +468,17 @@
         }
 
         .sidebar-content button:hover {
-            background: #0060a8;
+            filter: brightness(0.9);
         }
 
         .sidebar-content button:disabled {
-            background: #ccc;
+            background: var(--border-color);
             cursor: not-allowed;
         }
 
         .subreddit-tag {
             display: inline-block;
-            background: #0079d3;
+            background: var(--accent-color);
             color: white;
             padding: 4px 12px;
             border-radius: 12px;
@@ -482,15 +488,15 @@
         }
 
         .subreddit-tag:hover {
-            background: #0060a8;
+            filter: brightness(0.9);
         }
 
         .subreddit-tag.blocked {
-            background: #f44336;
+            background: var(--warning-color);
         }
 
         .subreddit-tag.blocked:hover {
-            background: #d32f2f;
+            filter: brightness(0.9);
         }
 
         .post {
@@ -601,6 +607,7 @@
             width: 100%;
             background: #000;
             min-height: 300px;
+            margin-bottom: 12px;
         }
 
         .gallery-container {
@@ -722,7 +729,7 @@
         }
 
         .post-text a {
-            color: #0079d3;
+            color: var(--tabs-color);
             text-decoration: none;
             word-break: break-all;
         }
@@ -734,7 +741,7 @@
         .post-text-toggle {
             background: none;
             border: none;
-            color: var(--accent-color);
+            color: var(--tabs-color);
             cursor: pointer;
             padding: 4px 0;
             font-weight: 600;
@@ -831,13 +838,13 @@
         }
 
         .filter-chip:hover {
-            border-color: var(--accent-color);
+            border-color: var(--primary-color);
         }
 
         .filter-chip.active {
-            background: var(--accent-color);
+            background: var(--primary-color);
             color: white;
-            border-color: var(--accent-color);
+            border-color: var(--primary-color);
         }
 
         .subreddit-popup {
@@ -955,29 +962,30 @@
         }
 
         .popup-btn-follow {
-            background: #0079d3;
+            background: var(--accent-color);
             color: white;
         }
 
         .popup-btn-follow:hover {
-            background: #0060a8;
+            filter: brightness(0.9);
         }
 
         .popup-btn-follow.following {
-            background: #ccc;
+            background: var(--border-color);
+            color: var(--text-primary);
         }
 
         .popup-btn-block {
-            background: #f44336;
+            background: var(--warning-color);
             color: white;
         }
 
         .popup-btn-block:hover {
-            background: #d32f2f;
+            filter: brightness(0.9);
         }
 
         .popup-btn-block.blocked {
-            background: #666;
+            background: var(--text-secondary);
         }
 
         .feed-tab {
@@ -999,8 +1007,8 @@
         }
 
         .feed-tab.active {
-            color: var(--accent-color);
-            border-bottom-color: var(--accent-color);
+            color: var(--tabs-color);
+            border-bottom-color: var(--tabs-color);
         }
 
         .error {
@@ -1098,7 +1106,7 @@
 
         .welcome-actions button {
             flex: 1;
-            background: #0079d3;
+            background: var(--accent-color);
             color: white;
             border: none;
             padding: 12px 24px;
@@ -1109,7 +1117,7 @@
         }
 
         .welcome-actions button:hover {
-            background: #0060a8;
+            background: var(--accent-color);
         }
 
         .welcome-actions button:disabled {
@@ -1219,11 +1227,11 @@
 
     <div class="sidebar" id="sidebar">
         <div class="sidebar-header">
-            Subreddits
+            settings
             <button class="close-btn" id="closeSidebar">×</button>
         </div>
         <div class="sidebar-content">
-            <button id="refreshPostsBtn" style="width: 100%; margin-bottom: 16px; background: var(--accent-color);">Refresh Posts</button>
+            <button id="refreshPostsBtn" style="width: 100%; margin-bottom: 16px; background: var(--primary-color); color: white; border: none; padding: 10px; border-radius: 4px; cursor: pointer; font-weight: 600;">Refresh Posts</button>
             <input type="text" id="subredditInput" placeholder="Enter subreddit name" autocomplete="off" />
             <div class="button-row">
                 <button id="addSubredditBtn">Add Subreddit</button>
@@ -1231,12 +1239,12 @@
             <div class="subreddit-list" id="subredditList" style="max-height: 200px; overflow-y: auto;"></div>
             
             <div id="blockedSection" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border-color); display: none;">
-                <h3 style="font-size: 14px; margin-bottom: 10px; color: #f44336;">Blocked Subreddits</h3>
+                <h3 style="font-size: 14px; margin-bottom: 10px; color: var(--text-secondary);">Blocked Subreddits</h3>
                 <div class="subreddit-list" id="blockedList" style="max-height: 150px; overflow-y: auto;"></div>
             </div>
             
             <div id="blockedUsersSection" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border-color); display: none;">
-                <h3 style="font-size: 14px; margin-bottom: 10px; color: #f44336;">Blocked Users</h3>
+                <h3 style="font-size: 14px; margin-bottom: 10px; color: var(--text-secondary);">Blocked Users</h3>
                 <div class="subreddit-list" id="blockedUsersList" style="max-height: 150px; overflow-y: auto;"></div>
             </div>
 
@@ -1274,7 +1282,7 @@
             <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
                 <div id="versionInfo" style="font-size: 11px; color: #999; text-align: center; margin-bottom: 10px;"></div>
                 <div style="text-align: center;">
-                    <a href="https://github.com/h2oforlife/enpwa" target="_blank" rel="noopener" style="color: var(--accent-color); text-decoration: none; font-size: 12px; font-weight: 600;">GitHub</a>
+                    <a href="https://github.com/h2oforlife/enpwa" target="_blank" rel="noopener" style="color: #999; text-decoration: none; font-size: 12px; font-weight: 600;">GitHub</a>
                 </div>
             </div>
         </div>
@@ -1283,7 +1291,7 @@
     <div class="header">
         <div class="header-left">
             <button class="menu-btn" id="menuBtn">☰</button>
-            <h1>ENP</h1>
+            <h1>enpwa</h1>
         </div>
         <div class="header-right">
             <span id="queueIndicator" class="queue-indicator"></span>
