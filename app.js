@@ -8,8 +8,8 @@
     // CONFIGURATION
     // ============================================================================
     const CONFIG = {
-        REQUESTS_PER_MINUTE: 10,
-        REQUEST_INTERVAL: 6000,
+        REQUESTS_PER_MINUTE: 50,
+        REQUEST_INTERVAL: 1200, // 1.2 seconds between requests
         MAX_RETRIES: 3,
         POSTS_LIMIT: 25,
         UPDATE_CHECK_INTERVAL: 5 * 60 * 1000,
@@ -77,6 +77,9 @@
 
     // Toast registry to prevent memory leaks
     const activeToasts = new Map(); // id -> {element, timeout}
+    
+    // Pending posts lock to prevent race conditions
+    let pendingPostsLock = Promise.resolve();
 
     // ============================================================================
     // ERROR HANDLING WRAPPER
@@ -681,30 +684,35 @@
     }
 
     function addPostsToPending(posts, feedType, subreddit = null) {
-        const feed = state.feeds[feedType];
-        
-        // Use intelligent deduplication
-        const newPosts = getNewPostsOnly(posts, subreddit, feedType);
-        
-        if (newPosts.length > 0) {
-            feed.pending.posts = [...feed.pending.posts, ...newPosts];
-            feed.pending.count = feed.pending.posts.length;
+        // Queue this operation to prevent race conditions
+        pendingPostsLock = pendingPostsLock.then(() => {
+            const feed = state.feeds[feedType];
             
-            // Track last fetch time for this subreddit/feed
-            if (subreddit) {
-                const newest = Math.max(...newPosts.map(p => p.created_utc));
-                feed.lastFetch[subreddit] = newest;
-            } else if (feedType === 'popular') {
-                const newest = Math.max(...newPosts.map(p => p.created_utc));
-                feed.lastFetch['_popular'] = newest;
+            // Use intelligent deduplication
+            const newPosts = getNewPostsOnly(posts, subreddit, feedType);
+            
+            if (newPosts.length > 0) {
+                feed.pending.posts = [...feed.pending.posts, ...newPosts];
+                feed.pending.count = feed.pending.posts.length;
+                
+                // Track last fetch time for this subreddit/feed
+                if (subreddit) {
+                    const newest = Math.max(...newPosts.map(p => p.created_utc));
+                    feed.lastFetch[subreddit] = newest;
+                } else if (feedType === 'popular') {
+                    const newest = Math.max(...newPosts.map(p => p.created_utc));
+                    feed.lastFetch['_popular'] = newest;
+                }
+                
+                debouncedSave();
+                
+                console.log(`✓ Added ${newPosts.length} new posts to ${feedType}${subreddit ? ` (r/${subreddit})` : ''}`);
+            } else {
+                console.log(`✓ No new posts for ${feedType}${subreddit ? ` (r/${subreddit})` : ''} - all ${posts.length} already cached`);
             }
-            
-            debouncedSave();
-            
-            console.log(`✓ Added ${newPosts.length} new posts to ${feedType}${subreddit ? ` (r/${subreddit})` : ''}`);
-        } else {
-            console.log(`✓ No new posts for ${feedType}${subreddit ? ` (r/${subreddit})` : ''} - all ${posts.length} already cached`);
-        }
+        });
+        
+        return pendingPostsLock;
     }
 
     async function fetchFeedWithRetry(feedType, subreddit = null, retryCount = 0) {
@@ -1701,6 +1709,9 @@
         text = text.replace(/<a\s+href="([^"]+)"[^>]*>([^<]+)<\/a>/gi, '<a href="$1" target="_blank" rel="noopener">$2</a>');
         text = text.replace(/\[([^\]]+)\]\(([^\)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
         
+        // Convert plain URLs to clickable links
+        text = text.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+        
         // Convert newlines to <br>
         text = text.replace(/\n/g, '<br>');
         
@@ -1809,6 +1820,8 @@
         const list = document.getElementById('subredditList');
         const blockedList = document.getElementById('blockedList');
         const blockedSection = document.getElementById('blockedSection');
+        const blockedUsersList = document.getElementById('blockedUsersList');
+        const blockedUsersSection = document.getElementById('blockedUsersSection');
         
         if (list) {
             // Sort subreddits A-Z
@@ -1816,9 +1829,9 @@
                 a.toLowerCase().localeCompare(b.toLowerCase())
             );
             
-            const title = '<h3 style="font-size: 14px; margin-bottom: 10px; color: #666;">Followed Subreddits</h3>';
+            const title = '<h3 style="font-size: 14px; margin-bottom: 10px; color: var(--text-secondary);">Followed Subreddits</h3>';
             const content = sortedSubs.length === 0 
-                ? '<span style="color: #7c7c7c;">No subreddits added yet</span>'
+                ? '<span style="color: var(--text-secondary);">No subreddits added yet</span>'
                 : sortedSubs.map(sub => 
                     `<span class="subreddit-tag" onclick="window.removeSubreddit('${sub}')">r/${sub} ×</span>`
                   ).join('');
@@ -1842,7 +1855,32 @@
                 ).join('');
             }
         }
+        
+        if (blockedUsersList && blockedUsersSection) {
+            if (state.blockedUsers.length === 0) {
+                blockedUsersSection.style.display = 'none';
+            } else {
+                blockedUsersSection.style.display = 'block';
+                
+                // Sort blocked users A-Z
+                const sortedBlockedUsers = [...state.blockedUsers].sort((a, b) => 
+                    a.toLowerCase().localeCompare(b.toLowerCase())
+                );
+                
+                blockedUsersList.innerHTML = sortedBlockedUsers.map(user => 
+                    `<span class="subreddit-tag blocked" onclick="window.unblockUser('${user}')">u/${user} ×</span>`
+                ).join('');
+            }
+        }
     }
+
+    window.unblockUser = function(username) {
+        state.blockedUsers = state.blockedUsers.filter(u => u.toLowerCase() !== username.toLowerCase());
+        saveState();
+        renderSubreddits();
+        renderPosts();
+        showToast(`Unblocked u/${username}`, { type: 'success' });
+    };
 
     function addSubreddit() {
         const input = document.getElementById('subredditInput');

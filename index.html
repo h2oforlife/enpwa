@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#ff4500">
+    <meta name="theme-color" content="var(--accent-color)">
     <title>Emergency News PWA</title>
     <link rel="manifest" href="./manifest.json">
     <style>
@@ -14,7 +14,7 @@
             --text-secondary: #666;
             --text-muted: #999;
             --border-color: #eee;
-            --accent-color: #ff4500;
+            --accent-color: var(--accent-color);
             --sidebar-bg: #ffffff;
             --post-bg: #ffffff;
             --input-bg: #f6f7f8;
@@ -72,7 +72,7 @@
         }
 
         .header {
-            background: #ff4500;
+            background: var(--accent-color);
             color: white;
             padding: 12px 16px;
             position: sticky;
@@ -179,7 +179,7 @@
             top: -100px;
             left: 50%;
             transform: translateX(-50%);
-            background: #ff4500;
+            background: var(--accent-color);
             color: white;
             padding: 12px 20px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.3);
@@ -208,7 +208,7 @@
 
         .toast-action {
             background: white;
-            color: #ff4500;
+            color: var(--accent-color);
             border: none;
             padding: 6px 16px;
             border-radius: 4px;
@@ -339,7 +339,7 @@
         }
 
         .confirm-btn.confirm {
-            background: #ff4500;
+            background: var(--accent-color);
             color: white;
         }
 
@@ -387,7 +387,7 @@
         }
 
         .sidebar-header {
-            background: #ff4500;
+            background: var(--accent-color);
             color: white;
             padding: 16px;
             font-size: 18px;
@@ -518,7 +518,7 @@
         }
 
         .subreddit-name:hover {
-            color: #ff4500;
+            color: var(--accent-color);
         }
 
         .post-author {
@@ -831,13 +831,13 @@
         }
 
         .filter-chip:hover {
-            border-color: #ff4500;
+            border-color: var(--accent-color);
         }
 
         .filter-chip.active {
-            background: #ff4500;
+            background: var(--accent-color);
             color: white;
-            border-color: #ff4500;
+            border-color: var(--accent-color);
         }
 
         .subreddit-popup {
@@ -895,7 +895,7 @@
 
         .subreddit-popup-banner {
             height: 100px;
-            background: linear-gradient(to bottom, #ff4500, rgba(255, 69, 0, 0));
+            background: linear-gradient(to bottom, var(--accent-color), rgba(255, 69, 0, 0));
             position: relative;
             background-size: cover;
             background-position: center;
@@ -1038,7 +1038,7 @@
         }
 
         .welcome-content h2 {
-            color: #ff4500;
+            color: var(--accent-color);
             margin-bottom: 10px;
         }
 
@@ -1066,13 +1066,13 @@
         }
 
         .country-option:hover {
-            border-color: #ff4500;
+            border-color: var(--accent-color);
             background: #fff5f0;
         }
 
         .country-option.selected {
-            border-color: #ff4500;
-            background: #ff4500;
+            border-color: var(--accent-color);
+            background: var(--accent-color);
             color: white;
         }
 
@@ -1133,7 +1133,7 @@
             top: 0;
             left: 0;
             right: 0;
-            background: #ff4500;
+            background: var(--accent-color);
             color: white;
             padding: 8px 16px;
             text-align: center;
@@ -1152,7 +1152,7 @@
             top: 0;
             left: 0;
             right: 0;
-            background: #ff4500;
+            background: var(--accent-color);
             color: white;
             padding: 12px 16px;
             z-index: 101;
@@ -1168,7 +1168,7 @@
 
         .update-notification .update-button {
             background: white;
-            color: #ff4500;
+            color: var(--accent-color);
             border: none;
             padding: 8px 16px;
             border-radius: 4px;
@@ -1223,19 +1223,24 @@
             <button class="close-btn" id="closeSidebar">×</button>
         </div>
         <div class="sidebar-content">
-            <button id="refreshPostsBtn" style="width: 100%; margin-bottom: 16px; background: #ff4500;">Refresh Posts</button>
+            <button id="refreshPostsBtn" style="width: 100%; margin-bottom: 16px; background: var(--accent-color);">Refresh Posts</button>
             <input type="text" id="subredditInput" placeholder="Enter subreddit name" autocomplete="off" />
             <div class="button-row">
                 <button id="addSubredditBtn">Add Subreddit</button>
             </div>
-            <div class="subreddit-list" id="subredditList"></div>
+            <div class="subreddit-list" id="subredditList" style="max-height: 200px; overflow-y: auto;"></div>
             
-            <div id="blockedSection" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee; display: none;">
+            <div id="blockedSection" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border-color); display: none;">
                 <h3 style="font-size: 14px; margin-bottom: 10px; color: #f44336;">Blocked Subreddits</h3>
-                <div class="subreddit-list" id="blockedList"></div>
+                <div class="subreddit-list" id="blockedList" style="max-height: 150px; overflow-y: auto;"></div>
+            </div>
+            
+            <div id="blockedUsersSection" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border-color); display: none;">
+                <h3 style="font-size: 14px; margin-bottom: 10px; color: #f44336;">Blocked Users</h3>
+                <div class="subreddit-list" id="blockedUsersList" style="max-height: 150px; overflow-y: auto;"></div>
             </div>
 
-            <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
+            <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border-color);">
                 <h3 style="font-size: 14px; margin-bottom: 10px; color: var(--text-secondary);">Storage</h3>
                 <div id="storageStats" style="font-size: 12px; color: var(--text-secondary); line-height: 1.6;">
                     <div style="margin-bottom: 8px;">
@@ -1269,7 +1274,7 @@
             <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
                 <div id="versionInfo" style="font-size: 11px; color: #999; text-align: center; margin-bottom: 10px;"></div>
                 <div style="text-align: center;">
-                    <a href="https://github.com/h2oforlife/enpwa" target="_blank" rel="noopener" style="color: #ff4500; text-decoration: none; font-size: 12px; font-weight: 600;">GitHub</a>
+                    <a href="https://github.com/h2oforlife/enpwa" target="_blank" rel="noopener" style="color: var(--accent-color); text-decoration: none; font-size: 12px; font-weight: 600;">GitHub</a>
                 </div>
             </div>
         </div>
