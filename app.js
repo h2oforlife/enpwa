@@ -26,8 +26,8 @@
     // ============================================================================
     const state = {
         feeds: {
-            my: { posts: [], pending: { posts: [], count: 0 } },
-            popular: { posts: [], pending: { posts: [], count: 0 } },
+            my: { posts: [], pending: { posts: [], count: 0 }, lastFetch: {} },
+            popular: { posts: [], pending: { posts: [], count: 0 }, lastFetch: {} },
             starred: { posts: [] }
         },
         subreddits: [],
@@ -105,6 +105,10 @@
                 // Load pending posts
                 state.feeds.my.pending = parsed.myPending || { posts: [], count: 0 };
                 state.feeds.popular.pending = parsed.popularPending || { posts: [], count: 0 };
+                
+                // Load lastFetch tracking
+                state.feeds.my.lastFetch = parsed.myLastFetch || {};
+                state.feeds.popular.lastFetch = parsed.popularLastFetch || {};
                 
                 // Fix rate limit state corruption
                 if (parsed.rateLimitState) {
@@ -192,7 +196,9 @@
                 rateLimitState: state.rateLimitState,
                 syncQueue: state.syncQueue,
                 myPending: state.feeds.my.pending,
-                popularPending: state.feeds.popular.pending
+                popularPending: state.feeds.popular.pending,
+                myLastFetch: state.feeds.my.lastFetch,
+                popularLastFetch: state.feeds.popular.lastFetch
             };
             
             localStorage.setItem('appState', JSON.stringify(toSave));
@@ -595,14 +601,14 @@
             if (job.type === 'fetch_subreddit') {
                 const result = await fetchFeedWithRetry('subreddit', job.subreddit, job.retries - 1);
                 if (result.posts) {
-                    addPostsToPending(result.posts, 'my');
+                    addPostsToPending(result.posts, 'my', job.subreddit);
                     return { success: true };
                 }
                 return { success: false, error: result.error };
             } else if (job.type === 'fetch_popular') {
                 const result = await fetchFeedWithRetry('popular', null, job.retries - 1);
                 if (result.posts) {
-                    addPostsToPending(result.posts, 'popular');
+                    addPostsToPending(result.posts, 'popular', null);
                     return { success: true };
                 }
                 return { success: false, error: result.error };
@@ -615,21 +621,30 @@
         }
     }
 
-    function addPostsToPending(posts, feedType) {
+    function addPostsToPending(posts, feedType, subreddit = null) {
         const feed = state.feeds[feedType];
         
-        // Filter out posts that already exist in main feed or pending
-        const existingIds = new Set([
-            ...feed.posts.map(p => p.id),
-            ...feed.pending.posts.map(p => p.id)
-        ]);
-        
-        const newPosts = posts.filter(p => !existingIds.has(p.id));
+        // Use intelligent deduplication
+        const newPosts = getNewPostsOnly(posts, subreddit, feedType);
         
         if (newPosts.length > 0) {
             feed.pending.posts = [...feed.pending.posts, ...newPosts];
             feed.pending.count = feed.pending.posts.length;
+            
+            // Track last fetch time for this subreddit/feed
+            if (subreddit) {
+                const newest = Math.max(...newPosts.map(p => p.created_utc));
+                feed.lastFetch[subreddit] = newest;
+            } else if (feedType === 'popular') {
+                const newest = Math.max(...newPosts.map(p => p.created_utc));
+                feed.lastFetch['_popular'] = newest;
+            }
+            
             debouncedSave();
+            
+            console.log(`✓ Added ${newPosts.length} new posts to ${feedType}${subreddit ? ` (r/${subreddit})` : ''}`);
+        } else {
+            console.log(`✓ No new posts for ${feedType}${subreddit ? ` (r/${subreddit})` : ''} - all ${posts.length} already cached`);
         }
     }
 
@@ -841,6 +856,30 @@
             seen.add(post.id);
             return true;
         });
+    }
+
+    /**
+     * Get only new posts that aren't already cached
+     * Used for intelligent incremental updates
+     */
+    function getNewPostsOnly(fetchedPosts, subreddit, feedType = 'my') {
+        const feed = state.feeds[feedType];
+        
+        // Build set of all existing IDs (both in feed and pending)
+        const existingIds = new Set([
+            ...feed.posts.filter(p => !subreddit || p.subreddit.toLowerCase() === subreddit.toLowerCase()).map(p => p.id),
+            ...feed.pending.posts.filter(p => !subreddit || p.subreddit.toLowerCase() === subreddit.toLowerCase()).map(p => p.id)
+        ]);
+        
+        const newPosts = fetchedPosts.filter(p => !existingIds.has(p.id));
+        
+        // Log cache efficiency
+        if (fetchedPosts.length > 0) {
+            const cacheHitRate = ((fetchedPosts.length - newPosts.length) / fetchedPosts.length * 100).toFixed(0);
+            console.log(`Cache efficiency: ${cacheHitRate}% (${fetchedPosts.length - newPosts.length}/${fetchedPosts.length} cached)${subreddit ? ` for r/${subreddit}` : ''}`);
+        }
+        
+        return newPosts;
     }
 
     // ============================================================================
