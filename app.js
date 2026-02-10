@@ -1091,6 +1091,14 @@
         // Load state
         loadState();
         
+        // Initialize theme
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        document.documentElement.setAttribute('data-theme', savedTheme);
+        const btn = document.getElementById('themeToggle');
+        if (btn) {
+            btn.textContent = savedTheme === 'dark' ? '☀️ Light Mode' : '🌙 Dark Mode';
+        }
+        
         // Initialize storage quota
         await initializeStorageQuota();
         
@@ -1161,6 +1169,10 @@
         if (exportBtn) exportBtn.onclick = exportSubreddits;
         if (importBtn) importBtn.onclick = () => importFile && importFile.click();
         if (importFile) importFile.onchange = importSubreddits;
+        
+        // Theme toggle
+        const themeToggle = document.getElementById('themeToggle');
+        if (themeToggle) themeToggle.onclick = toggleTheme;
         
         // Update button
         const updateBtn = document.getElementById('updateButton');
@@ -1322,6 +1334,19 @@
         if (notification) notification.classList.add('active');
     }
 
+    function toggleTheme() {
+        const current = document.documentElement.getAttribute('data-theme');
+        const next = current === 'dark' ? 'light' : 'dark';
+        
+        document.documentElement.setAttribute('data-theme', next);
+        localStorage.setItem('theme', next);
+        
+        const btn = document.getElementById('themeToggle');
+        if (btn) {
+            btn.textContent = next === 'dark' ? '☀️ Light Mode' : '🌙 Dark Mode';
+        }
+    }
+
     function updatePWA() {
         const now = new Date();
         try {
@@ -1401,9 +1426,14 @@
                 return;
             }
             
+            // Sort A-Z
+            const sortedAvailable = [...available].sort((a, b) => 
+                a.toLowerCase().localeCompare(b.toLowerCase())
+            );
+            
             filterBar.classList.add('active');
             const chips = ['<span class="filter-chip active" data-filter="all">All</span>'];
-            available.forEach(sub => {
+            sortedAvailable.forEach(sub => {
                 chips.push(`<span class="filter-chip" data-filter="${sub}">r/${sub}</span>`);
             });
             
@@ -1494,7 +1524,6 @@
             loadMoreBtn.onclick = () => {
                 state.feeds[state.current].currentPage = (state.feeds[state.current].currentPage || 1) + 1;
                 renderPosts();
-                window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
             };
             loadMoreBtn.style.cssText = `
                 display: block;
@@ -1542,10 +1571,28 @@
 
     function getMediaHTML(post) {
         if (post.is_video && post.video_url) {
+            // Get thumbnail from gallery (first preview image)
+            const thumbnail = post.gallery && post.gallery[0] ? post.gallery[0] : '';
+            
+            if (thumbnail) {
+                return `
+                    <div class="video-preview" onclick="window.playVideo(this, '${esc(post.video_url)}')">
+                        <img class="video-thumbnail" src="${esc(thumbnail)}" alt="Video thumbnail" loading="lazy" />
+                        <div class="video-play-overlay">
+                            <div class="video-play-button">▶</div>
+                        </div>
+                        <video class="post-video" style="display: none;" controls preload="none">
+                            <source src="${esc(post.video_url)}" type="video/mp4">
+                        </video>
+                    </div>
+                `;
+            }
+            
+            // Fallback to direct video if no thumbnail
             return `<video class="post-image" controls preload="metadata"><source src="${esc(post.video_url)}" type="video/mp4"></video>`;
         }
         
-        if (post.gallery && post.gallery.length > 0) {
+        if (post.gallery && post.gallery.length > 0 && !post.is_video) {
             if (post.gallery.length === 1) {
                 return `<img class="post-image" src="${esc(post.gallery[0])}" alt="" loading="lazy" />`;
             }
@@ -1572,6 +1619,25 @@
         
         return '';
     }
+
+    window.playVideo = function(container, videoUrl) {
+        if (!navigator.onLine) {
+            showToast('You must be online to play videos', { type: 'warning' });
+            return;
+        }
+        
+        const thumbnail = container.querySelector('.video-thumbnail');
+        const overlay = container.querySelector('.video-play-overlay');
+        const video = container.querySelector('.post-video');
+        
+        if (thumbnail) thumbnail.style.display = 'none';
+        if (overlay) overlay.style.display = 'none';
+        if (video) {
+            video.style.display = 'block';
+            video.load();
+            video.play();
+        }
+    };
 
     function getTextHTML(post) {
         if (!post.selftext) return '';
@@ -1789,21 +1855,27 @@
 
     function exportSubreddits() {
         const data = {
+            version: '1.0',
+            exportDate: new Date().toISOString(),
             subreddits: state.subreddits,
-            exportDate: new Date().toISOString()
+            blocked: state.blocked,
+            starredPosts: state.feeds.starred.posts,
+            settings: {
+                theme: localStorage.getItem('theme') || 'light'
+            }
         };
         
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `reddit-pwa-subreddits-${new Date().toISOString().split('T')[0]}.json`;
+        a.download = `enpwa-backup-${new Date().toISOString().split('T')[0]}.json`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
         
-        showToast('Subreddits exported!', { type: 'success' });
+        showToast('Backup exported!', { type: 'success' });
     }
 
     function importSubreddits(event) {
@@ -1814,28 +1886,68 @@
         reader.onload = (e) => {
             try {
                 const data = JSON.parse(e.target.result);
-                if (!data.subreddits || !Array.isArray(data.subreddits)) {
-                    showToast('Invalid file format', { type: 'error' });
+                
+                // Validate structure
+                if (!data.version && !data.subreddits) {
+                    showToast('Invalid backup file', { type: 'error' });
                     return;
                 }
                 
-                const normalized = state.subreddits.map(s => s.toLowerCase());
-                const newSubs = data.subreddits.filter(sub => !normalized.includes(sub.toLowerCase()));
+                let imported = [];
                 
-                state.subreddits = [...state.subreddits, ...newSubs];
+                // Import subreddits
+                if (data.subreddits && Array.isArray(data.subreddits)) {
+                    const normalized = state.subreddits.map(s => s.toLowerCase());
+                    const newSubs = data.subreddits.filter(sub => !normalized.includes(sub.toLowerCase()));
+                    state.subreddits = [...state.subreddits, ...newSubs];
+                    imported.push(`${newSubs.length} subs`);
+                    
+                    if (newSubs.length > 0) {
+                        newSubs.forEach(sub => queueSyncJob('fetch_subreddit', sub));
+                    }
+                }
+                
+                // Import blocked subreddits
+                if (data.blocked && Array.isArray(data.blocked)) {
+                    const normalizedBlocked = state.blocked.map(s => s.toLowerCase());
+                    const newBlocked = data.blocked.filter(sub => !normalizedBlocked.includes(sub.toLowerCase()));
+                    state.blocked = [...state.blocked, ...newBlocked];
+                    imported.push(`${newBlocked.length} blocked`);
+                    
+                    // Rebuild filtered cache
+                    state.feeds.popular.filtered = state.feeds.popular.posts.filter(p => 
+                        !state.blocked.some(b => b.toLowerCase() === p.subreddit.toLowerCase())
+                    );
+                }
+                
+                // Import starred posts
+                if (data.starredPosts && Array.isArray(data.starredPosts)) {
+                    const existingIds = new Set(state.feeds.starred.posts.map(p => p.id));
+                    const newStarred = data.starredPosts.filter(p => !existingIds.has(p.id));
+                    state.feeds.starred.posts = [...state.feeds.starred.posts, ...newStarred];
+                    imported.push(`${newStarred.length} starred`);
+                }
+                
+                // Import settings
+                if (data.settings && data.settings.theme) {
+                    localStorage.setItem('theme', data.settings.theme);
+                    document.documentElement.setAttribute('data-theme', data.settings.theme);
+                    const btn = document.getElementById('themeToggle');
+                    if (btn) {
+                        btn.textContent = data.settings.theme === 'dark' ? '☀️ Light Mode' : '🌙 Dark Mode';
+                    }
+                }
+                
                 saveState();
-                
                 renderSubreddits();
                 renderSubredditFilter();
                 updateFeedTabsVisibility();
+                renderPosts();
                 
-                showToast(`Imported ${data.subreddits.length} subreddits (${newSubs.length} new)`, { type: 'success' });
+                showToast(`Imported: ${imported.join(', ')}`, { type: 'success' });
                 
-                if (newSubs.length > 0) {
-                    toggleSidebar();
-                    newSubs.forEach(sub => queueSyncJob('fetch_subreddit', sub));
-                    processSyncQueue();
-                }
+                toggleSidebar();
+                processSyncQueue();
                 
                 event.target.value = '';
             } catch (error) {
