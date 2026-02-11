@@ -2391,6 +2391,7 @@
         if (isBlocked) {
             state.blockedUsers = state.blockedUsers.filter(u => u.toLowerCase() !== currentPopupUser.toLowerCase());
             saveState();
+            renderSubreddits();
             renderPosts();
             
             const blockBtn = document.getElementById('popupUserBlockBtn');
@@ -2403,6 +2404,7 @@
         } else {
             state.blockedUsers.push(currentPopupUser);
             saveState();
+            renderSubreddits();
             renderPosts();
             
             const blockBtn = document.getElementById('popupUserBlockBtn');
