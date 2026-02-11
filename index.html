@@ -193,7 +193,7 @@
             background: var(--accent-color);
             color: white;
             padding: 12px 20px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            box-shadow: #ff4500 0px 0px 8px;
             z-index: 1000;
             transition: top 0.3s ease;
             border-radius: 8px;
@@ -202,7 +202,7 @@
         }
 
         .update-toast.visible {
-            top: 20px;
+            top: 10px;
         }
 
         .toast-content {
@@ -907,7 +907,7 @@
 
         .subreddit-popup-banner {
             height: 100px;
-            background: linear-gradient(to bottom, var(--accent-color), rgba(255, 69, 0, 0));
+            background: linear-gradient(to bottom, var(--accent-color), transparent);
             position: relative;
             background-size: cover;
             background-position: center;
@@ -991,6 +991,7 @@
 
         .popup-btn-block.blocked {
             background: var(--text-secondary);
+            color: white;
         }
 
         .feed-tab {

@@ -1771,6 +1771,8 @@
         if (overlay) overlay.style.display = 'none';
         if (video) {
             video.style.display = 'block';
+            video.muted = false;
+            video.volume = 1.0;
             video.load();
             video.play();
         }
@@ -2197,7 +2199,7 @@
         infoEl.textContent = 'Loading...';
         iconEl.style.display = 'none';
         bannerEl.style.backgroundImage = '';
-        bannerEl.style.background = 'linear-gradient(to bottom, var(--accent-color), rgba(255, 69, 0, 0))';
+        bannerEl.style.background = 'linear-gradient(to bottom, var(--accent-color), transparent)';
         
         const isFollowing = state.subreddits.some(s => s.toLowerCase() === subredditName.toLowerCase());
         const isBlocked = state.blocked.some(s => s.toLowerCase() === subredditName.toLowerCase());
@@ -2238,7 +2240,7 @@
             if (sub.header_img && sub.header_img.trim()) {
                 bannerEl.style.backgroundImage = `url(${sub.header_img.replace(/&amp;/g, '&')})`;
             } else if (sub.key_color) {
-                bannerEl.style.background = `linear-gradient(to bottom, ${sub.key_color}, rgba(255, 255, 255, 0))`;
+                bannerEl.style.background = `linear-gradient(to bottom, ${sub.key_color}, transparent)`;
             }
         } catch (error) {
             console.error('Error fetching subreddit info:', error);
