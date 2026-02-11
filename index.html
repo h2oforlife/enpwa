@@ -32,6 +32,7 @@
             --border-color: #343536;
             --accent-color: #2a2a2a;
             --primary-color: #2a2a2a;
+            --orange-color: #ff4500;
             --tabs-color: #818384;
             --warning-color: #8b4545;
             --sidebar-bg: #1a1a1b;
@@ -184,26 +185,7 @@
             100% { transform: rotate(360deg); }
         }
 
-        /* NEW: Update toast notification */
-        .update-toast {
-            position: fixed;
-            top: -100px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: var(--accent-color);
-            color: white;
-            padding: 12px 20px;
-            box-shadow: #ff4500 0px 0px 8px;
-            z-index: 1000;
-            transition: top 0.3s ease;
-            border-radius: 8px;
-            max-width: 90%;
-            width: auto;
-        }
-
-        .update-toast.visible {
-            top: 10px;
-        }
+        /* NEW: Update toast notification - styles are inline in JS */
 
         .toast-content {
             display: flex;
@@ -754,6 +736,10 @@
             margin-top: 8px;
         }
 
+        [data-theme="dark"] .post-text-toggle {
+            color: var(--orange-color);
+        }
+
         .post-text-toggle:hover {
             text-decoration: underline;
         }
@@ -850,6 +836,11 @@
             background: var(--primary-color);
             color: white;
             border-color: var(--primary-color);
+        }
+
+        [data-theme="dark"] .filter-chip.active {
+            background: var(--orange-color);
+            border-color: var(--orange-color);
         }
 
         .subreddit-popup {
@@ -1015,6 +1006,11 @@
         .feed-tab.active {
             color: var(--tabs-color);
             border-bottom-color: var(--tabs-color);
+        }
+
+        [data-theme="dark"] .feed-tab.active {
+            color: var(--orange-color);
+            border-bottom-color: var(--orange-color);
         }
 
         .error {

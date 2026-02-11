@@ -558,8 +558,14 @@
         }
 
         // Video
-        if (post.is_video && post.media?.reddit_video?.fallback_url) {
-            result.video_url = post.media.reddit_video.fallback_url;
+        if (post.is_video && post.media?.reddit_video) {
+            const videoData = post.media.reddit_video;
+            result.video_url = videoData.fallback_url || videoData.dash_url;
+            // Reddit DASH videos have separate audio - construct audio URL
+            if (videoData.fallback_url) {
+                // Audio is typically at DASH_AUDIO.mp4 or DASH_audio.mp4
+                result.audio_url = videoData.fallback_url.replace(/DASH_\d+\.mp4/, 'DASH_AUDIO.mp4');
+            }
         }
 
         return result;
@@ -944,10 +950,10 @@
                 background: var(--accent-color);
                 color: white;
                 padding: 12px 20px;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                box-shadow: #ff4500 0px 0px 8px;
                 z-index: 1000;
                 transition: top 0.3s ease;
-                border-radius: 8px;
+                border-radius: 20px;
                 cursor: pointer;
                 font-weight: 500;
                 font-size: 14px;
@@ -960,7 +966,7 @@
             
             // Trigger animation
             setTimeout(() => {
-                toast.style.top = '20px';
+                toast.style.top = '10px';
             }, 10);
             
             state.newPostsToast = toast;
@@ -1712,8 +1718,9 @@
             const thumbnail = post.gallery && post.gallery[0] ? post.gallery[0] : '';
             
             if (thumbnail) {
+                const audioTrack = post.audio_url ? `<source src="${esc(post.audio_url)}" type="audio/mp4">` : '';
                 return `
-                    <div class="video-preview" onclick="window.playVideo(this, '${esc(post.video_url)}')">
+                    <div class="video-preview" onclick="window.playVideo(this, '${esc(post.video_url)}', '${esc(post.audio_url || '')}')">
                         <img class="video-thumbnail" src="${esc(thumbnail)}" alt="Video thumbnail" loading="lazy" />
                         <div class="video-play-overlay">
                             <div class="video-play-button">▶</div>
@@ -1721,6 +1728,7 @@
                         <video class="post-video" style="display: none;" controls preload="none">
                             <source src="${esc(post.video_url)}" type="video/mp4">
                         </video>
+                        ${audioTrack ? `<audio class="post-audio" style="display: none;" preload="none">${audioTrack}</audio>` : ''}
                     </div>
                 `;
             }
@@ -1757,7 +1765,7 @@
         return '';
     }
 
-    window.playVideo = function(container, videoUrl) {
+    window.playVideo = function(container, videoUrl, audioUrl) {
         if (!navigator.onLine) {
             showToast('You must be online to play videos', { type: 'warning' });
             return;
@@ -1766,15 +1774,34 @@
         const thumbnail = container.querySelector('.video-thumbnail');
         const overlay = container.querySelector('.video-play-overlay');
         const video = container.querySelector('.post-video');
+        const audio = container.querySelector('.post-audio');
         
         if (thumbnail) thumbnail.style.display = 'none';
         if (overlay) overlay.style.display = 'none';
+        
         if (video) {
             video.style.display = 'block';
             video.muted = false;
             video.volume = 1.0;
             video.load();
-            video.play();
+            
+            // If there's a separate audio track, sync it with video
+            if (audio && audioUrl) {
+                audio.load();
+                audio.volume = 1.0;
+                
+                // Sync audio with video
+                video.addEventListener('play', () => {
+                    audio.currentTime = video.currentTime;
+                    audio.play().catch(err => console.log('Audio play failed:', err));
+                });
+                video.addEventListener('pause', () => audio.pause());
+                video.addEventListener('seeked', () => {
+                    audio.currentTime = video.currentTime;
+                });
+            }
+            
+            video.play().catch(err => console.log('Video play failed:', err));
         }
     };
 
