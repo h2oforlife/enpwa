@@ -95,6 +95,46 @@
     }
 
     // ============================================================================
+    // HELPER FUNCTIONS
+    // ============================================================================
+    function rebuildPopularFiltered() {
+        state.feeds.popular.filtered = state.feeds.popular.posts.filter(p => 
+            !state.blocked.some(b => b.toLowerCase() === p.subreddit.toLowerCase())
+        );
+    }
+
+    function resetFeedPagination(feedType) {
+        state.feeds[feedType].currentPage = 1;
+    }
+
+    function updateAllViews() {
+        saveState();
+        renderSubreddits();
+        renderSubredditFilter();
+        renderPosts();
+    }
+
+    function updateRateLimitFromHeaders(response) {
+        const remaining = response.headers.get('X-Ratelimit-Remaining');
+        const reset = response.headers.get('X-Ratelimit-Reset');
+        if (remaining !== null) state.rateLimitState.remainingRequests = parseInt(remaining, 10);
+        if (reset !== null) state.rateLimitState.resetTime = parseInt(reset, 10) * 1000;
+    }
+
+    function getJobDisplayName(job) {
+        if (job.type === 'fetch_popular') return 'Popular';
+        if (job.type === 'fetch_subreddit') return `r/${job.subreddit}`;
+        return job.type;
+    }
+
+    function filterPostsByRules(posts) {
+        return posts.filter(post => 
+            !state.blocked.some(b => b.toLowerCase() === post.subreddit.toLowerCase()) &&
+            !state.blockedUsers.some(u => u.toLowerCase() === post.author.toLowerCase())
+        );
+    }
+
+    // ============================================================================
     // LOCAL STORAGE - Unified & Robust
     // ============================================================================
     function loadState() {
@@ -123,9 +163,7 @@
                 state.feeds.popular.lastFetch = parsed.popularLastFetch || {};
                 
                 // Build filtered cache for popular feed
-                state.feeds.popular.filtered = state.feeds.popular.posts.filter(p => 
-                    !state.blocked.some(b => b.toLowerCase() === p.subreddit.toLowerCase())
-                );
+                rebuildPopularFiltered();
                 
                 // Fix rate limit state corruption
                 if (parsed.rateLimitState) {
@@ -733,9 +771,7 @@
             state.feeds.popular.posts = removeDuplicates(allPosts).sort((a, b) => b.created_utc - a.created_utc);
             state.feeds.popular.pending = { posts: [], count: 0 };
             // Update filtered cache
-            state.feeds.popular.filtered = state.feeds.popular.posts.filter(p => 
-                !state.blocked.some(b => b.toLowerCase() === p.subreddit.toLowerCase())
-            );
+            rebuildPopularFiltered();
             saveState();
             if (state.current === 'popular') renderPosts();
         }
@@ -834,10 +870,7 @@
                 state.rateLimitState.requestCount++;
                 
                 // Update from headers if available
-                const remaining = response.headers.get('X-Ratelimit-Remaining');
-                const reset = response.headers.get('X-Ratelimit-Reset');
-                if (remaining !== null) state.rateLimitState.remainingRequests = parseInt(remaining, 10);
-                if (reset !== null) state.rateLimitState.resetTime = parseInt(reset, 10) * 1000;
+                updateRateLimitFromHeaders(response);
                 
                 debouncedSave();
                 
@@ -880,18 +913,10 @@
         const failed = state.syncQueue.filter(j => j.status === 'failed');
         
         if (processing) {
-            let feedName = '';
-            if (processing.type === 'fetch_popular') {
-                feedName = 'Popular';
-            } else if (processing.subreddit) {
-                feedName = `r/${processing.subreddit}`;
-            }
-            
-            if (feedName) {
-                indicator.textContent = `Syncing ${feedName}`;
-                indicator.classList.add('active');
-                indicator.classList.remove('warning');
-            }
+            const feedName = getJobDisplayName(processing);
+            indicator.textContent = `Syncing ${feedName}`;
+            indicator.classList.add('active');
+            indicator.classList.remove('warning');
         } else if (failed.length > 0) {
             indicator.textContent = `${failed.length} failed`;
             indicator.classList.add('active', 'warning');
@@ -988,9 +1013,7 @@
             state.feeds.popular.pending = { posts: [], count: 0 };
             
             // Rebuild filtered cache
-            state.feeds.popular.filtered = state.feeds.popular.posts.filter(p => 
-                !state.blocked.some(b => b.toLowerCase() === p.subreddit.toLowerCase())
-            );
+            rebuildPopularFiltered();
         }
         
         saveState();
@@ -1533,9 +1556,9 @@
         state.filter = 'all';
         
         // Reset pagination when switching feeds
-        state.feeds.my.currentPage = 1;
-        state.feeds.popular.currentPage = 1;
-        state.feeds.starred.currentPage = 1;
+        resetFeedPagination('my');
+        resetFeedPagination('popular');
+        resetFeedPagination('starred');
         
         debouncedSave();
         
@@ -1593,7 +1616,7 @@
 
     function setActiveFilter(filter) {
         state.filter = filter;
-        state.feeds[state.current].currentPage = 1; // Reset pagination on filter change
+        resetFeedPagination(state.current);
         document.querySelectorAll('.filter-chip').forEach(chip => {
             chip.classList.toggle('active', chip.dataset.filter === filter);
         });
@@ -2000,9 +2023,7 @@
             `Unblock u/${username}? Posts from this user will appear again in your feeds.`,
             () => {
                 state.blockedUsers = state.blockedUsers.filter(u => u.toLowerCase() !== username.toLowerCase());
-                saveState();
-                renderSubreddits();
-                renderPosts();
+                updateAllViews();
                 showToast(`Unblocked u/${username}`, { type: 'success' });
             }
         );
@@ -2043,11 +2064,8 @@
                     state.filter = 'all';
                 }
                 
-                saveState();
                 updateFeedTabsVisibility();
-                renderSubreddits();
-                renderSubredditFilter();
-                renderPosts();
+                updateAllViews();
                 showToast(`Removed r/${sub}`, { type: 'success' });
             }
         );
@@ -2058,15 +2076,8 @@
             `Unblock r/${sub}? Posts from this subreddit will appear again in your Popular feed.`,
             () => {
                 state.blocked = state.blocked.filter(s => s.toLowerCase() !== sub.toLowerCase());
-                
-                // Update filtered cache for popular feed
-                state.feeds.popular.filtered = state.feeds.popular.posts.filter(p => 
-                    !state.blocked.some(b => b.toLowerCase() === p.subreddit.toLowerCase())
-                );
-                
-                saveState();
-                renderSubreddits();
-                renderPosts();
+                rebuildPopularFiltered();
+                updateAllViews();
                 showToast(`Unblocked r/${sub}`, { type: 'success' });
             }
         );
@@ -2158,9 +2169,7 @@
                     imported.push(`${newBlocked.length} blocked subs`);
                     
                     // Rebuild filtered cache
-                    state.feeds.popular.filtered = state.feeds.popular.posts.filter(p => 
-                        !state.blocked.some(b => b.toLowerCase() === p.subreddit.toLowerCase())
-                    );
+                    rebuildPopularFiltered();
                 }
                 
                 // Import blocked users
@@ -2302,11 +2311,8 @@
                     state.feeds.my.pending.posts = state.feeds.my.pending.posts.filter(p => p.subreddit.toLowerCase() !== currentPopupSubreddit.toLowerCase());
                     state.feeds.my.pending.count = state.feeds.my.pending.posts.length;
                     
-                    saveState();
-                    renderSubreddits();
-                    renderSubredditFilter();
-                    renderPosts();
                     updateFeedTabsVisibility();
+                    updateAllViews();
                     
                     const followBtn = document.getElementById('popupFollowBtn');
                     if (followBtn) {
@@ -2325,10 +2331,8 @@
             }
             
             state.subreddits.push(currentPopupSubreddit);
-            saveState();
-            renderSubreddits();
-            renderSubredditFilter();
             updateFeedTabsVisibility();
+            updateAllViews();
             
             const followBtn = document.getElementById('popupFollowBtn');
             if (followBtn) {
@@ -2348,15 +2352,8 @@
         
         if (isBlocked) {
             state.blocked = state.blocked.filter(s => s !== currentPopupSubreddit);
-            
-            // Update filtered cache for popular feed
-            state.feeds.popular.filtered = state.feeds.popular.posts.filter(p => 
-                !state.blocked.some(b => b.toLowerCase() === p.subreddit.toLowerCase())
-            );
-            
-            saveState();
-            renderSubreddits();
-            renderPosts();
+            rebuildPopularFiltered();
+            updateAllViews();
             
             const blockBtn = document.getElementById('popupBlockBtn');
             if (blockBtn) {
@@ -2370,15 +2367,8 @@
                 `Block r/${currentPopupSubreddit}? Posts from this subreddit will be hidden from your Popular feed.`,
                 () => {
                     state.blocked.push(currentPopupSubreddit);
-                    
-                    // Update filtered cache for popular feed
-                    state.feeds.popular.filtered = state.feeds.popular.posts.filter(p => 
-                        !state.blocked.some(b => b.toLowerCase() === p.subreddit.toLowerCase())
-                    );
-                    
-                    saveState();
-                    renderSubreddits();
-                    renderPosts();
+                    rebuildPopularFiltered();
+                    updateAllViews();
                     
                     const blockBtn = document.getElementById('popupBlockBtn');
                     if (blockBtn) {
@@ -2429,9 +2419,7 @@
         
         if (isBlocked) {
             state.blockedUsers = state.blockedUsers.filter(u => u.toLowerCase() !== currentPopupUser.toLowerCase());
-            saveState();
-            renderSubreddits();
-            renderPosts();
+            updateAllViews();
             
             const blockBtn = document.getElementById('popupUserBlockBtn');
             if (blockBtn) {
@@ -2442,9 +2430,7 @@
             showToast(`Unblocked u/${currentPopupUser}`, { type: 'success' });
         } else {
             state.blockedUsers.push(currentPopupUser);
-            saveState();
-            renderSubreddits();
-            renderPosts();
+            updateAllViews();
             
             const blockBtn = document.getElementById('popupUserBlockBtn');
             if (blockBtn) {
