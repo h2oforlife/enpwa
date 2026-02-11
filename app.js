@@ -1289,7 +1289,12 @@
         const refreshBtn = document.getElementById('refreshPostsBtn');
         
         if (addBtn) addBtn.onclick = addSubreddit;
-        if (input) input.onkeypress = (e) => e.key === 'Enter' && addSubreddit();
+        if (input) input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                addSubreddit();
+            }
+        });
         if (refreshBtn) refreshBtn.onclick = refreshPosts;
         
         // Export/Import
@@ -2010,7 +2015,7 @@
         const sub = input.value.trim().replace(/^r\//, '');
         if (!sub) return;
         
-        if (state.subreddits.includes(sub)) {
+        if (state.subreddits.some(s => s.toLowerCase() === sub.toLowerCase())) {
             showToast('Subreddit already added', { type: 'warning' });
             return;
         }
@@ -2313,7 +2318,12 @@
                 }
             );
         } else {
-            // Follow
+            // Follow - check if already exists case-insensitively
+            if (state.subreddits.some(s => s.toLowerCase() === currentPopupSubreddit.toLowerCase())) {
+                showToast('Subreddit already added', { type: 'warning' });
+                return;
+            }
+            
             state.subreddits.push(currentPopupSubreddit);
             saveState();
             renderSubreddits();
