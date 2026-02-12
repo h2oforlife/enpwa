@@ -1,5 +1,5 @@
 // Emergency News PWA Service Worker
-// VERSION: 49 - Bump this number when you update ANY file to trigger app updates
+// VERSION: 50 - Bump this number when you update ANY file to trigger app updates
 
 const CACHE_NAME = 'reddit-pwa-app-shell';
 const RUNTIME_CACHE = 'reddit-pwa-runtime';
@@ -9,6 +9,7 @@ const APP_SHELL_FILES = [
     './',
     './index.html',
     './app.js',
+    './styles.css',
     './manifest.json',
     './reddit-icon-192.png',
     './reddit-icon-512.png'

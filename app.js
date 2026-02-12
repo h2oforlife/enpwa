@@ -1431,7 +1431,6 @@
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('./sw.js')
                 .then(reg => {
-                    updateStatusDot();
                     reg.addEventListener('updatefound', () => {
                         const newWorker = reg.installing;
                         newWorker.addEventListener('statechange', () => {
@@ -1453,7 +1452,11 @@
         const dot = document.getElementById('statusDot');
         if (!dot) return;
         
-        const online = navigator.onLine && navigator.serviceWorker.controller;
+        // Simple check - just use navigator.onLine
+        // The service worker check was causing issues with永久loading state
+        const online = navigator.onLine;
+        
+        dot.classList.remove('loading');
         dot.classList.toggle('online', online);
         dot.classList.toggle('offline', !online);
     }
@@ -1932,7 +1935,7 @@
             border-radius: 25px;
             background: var(--accent-color);
             color: white;
-            border: none;
+            border: 2px solid #ff4500;
             font-size: 24px;
             cursor: pointer;
             box-shadow: 0 2px 8px rgba(0,0,0,0.3);
@@ -2540,6 +2543,7 @@
     function updateAllDisplays() {
         updateStorageStats();
         updateVersionInfo();
+        updateStatusDot(); // Update online/offline status periodically
     }
 
     function updateVersionInfo() {
