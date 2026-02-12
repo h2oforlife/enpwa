@@ -1452,11 +1452,10 @@
         const dot = document.getElementById('statusDot');
         if (!dot) return;
         
-        // Simple check - just use navigator.onLine
-        // The service worker check was causing issues with永久loading state
-        const online = navigator.onLine;
+        // Don't override loading state if actively syncing
+        if (dot.classList.contains('loading')) return;
         
-        dot.classList.remove('loading');
+        const online = navigator.onLine;
         dot.classList.toggle('online', online);
         dot.classList.toggle('offline', !online);
     }
@@ -1715,69 +1714,53 @@
         }
     }
 
-    function createPostHTML(post) {
-        const isBookmarked = state.feeds.starred.posts.some(p => p.id === post.id);
+    // ============================================================================
+    // TEMPLATE HELPERS
+    // ============================================================================
+    const templates = {
+        postHeader: (post, isBookmarked) => `
+            <div class="post-header">
+                <span class="subreddit-name" onclick="window.openSubredditPopup('${esc(post.subreddit)}')">r/${esc(post.subreddit)}</span>
+                • Posted by <span class="post-author" onclick="window.openUserPopup('${esc(post.author)}')" style="cursor: pointer; text-decoration: underline;">u/${esc(post.author)}</span>
+                • ${formatTime(post.created_utc)}
+                <button class="bookmark-btn ${isBookmarked ? 'bookmarked' : ''}" 
+                        onclick="window.toggleBookmark('${post.id}')" 
+                        title="${isBookmarked ? 'Remove from starred' : 'Add to starred'}">
+                    ${isBookmarked ? '★' : '☆'}
+                </button>
+            </div>`,
         
-        return `
-            <div class="post">
-                <div class="post-header">
-                    <span class="subreddit-name" onclick="window.openSubredditPopup('${esc(post.subreddit)}')">r/${esc(post.subreddit)}</span>
-                    • Posted by <span class="post-author" onclick="window.openUserPopup('${esc(post.author)}')" style="cursor: pointer; text-decoration: underline;">u/${esc(post.author)}</span>
-                    • ${formatTime(post.created_utc)}
-                    <button class="bookmark-btn ${isBookmarked ? 'bookmarked' : ''}" 
-                            onclick="window.toggleBookmark('${post.id}')" 
-                            title="${isBookmarked ? 'Remove from starred' : 'Add to starred'}">
-                        ${isBookmarked ? '★' : '☆'}
-                    </button>
-                </div>
-                <div class="post-title">
-                    <a href="https://reddit.com${esc(post.permalink)}" target="_blank" rel="noopener">${esc(post.title)}</a>
-                </div>
-                ${getMediaHTML(post)}
-                ${getTextHTML(post)}
-                <div class="post-footer">
-                    <span class="post-stat">⬆ ${formatNumber(post.ups)} upvotes</span>
-                    <span class="post-stat">💬 ${formatNumber(post.num_comments)} comments</span>
-                </div>
-            </div>
-        `;
-    }
-
-    function getMediaHTML(post) {
-        if (post.is_video && post.video_url) {
-            // Get thumbnail from gallery (first preview image)
-            const thumbnail = post.gallery && post.gallery[0] ? post.gallery[0] : '';
-            
-            if (thumbnail) {
-                const audioTrack = post.audio_url ? `<source src="${esc(post.audio_url)}" type="audio/mp4">` : '';
-                return `
-                    <div class="video-preview" onclick="window.playVideo(this, '${esc(post.video_url)}', '${esc(post.audio_url || '')}')">
-                        <img class="video-thumbnail" src="${esc(thumbnail)}" alt="Video thumbnail" loading="lazy" />
-                        <div class="video-play-overlay">
-                            <div class="video-play-button">▶</div>
-                        </div>
-                        <video class="post-video" style="display: none;" controls preload="none">
-                            <source src="${esc(post.video_url)}" type="video/mp4">
-                        </video>
-                        ${audioTrack ? `<audio class="post-audio" style="display: none;" preload="none">${audioTrack}</audio>` : ''}
+        postTitle: (post) => `
+            <div class="post-title">
+                <a href="https://reddit.com${esc(post.permalink)}" target="_blank" rel="noopener">${esc(post.title)}</a>
+            </div>`,
+        
+        postFooter: (post) => `
+            <div class="post-footer">
+                <span class="post-stat">⬆ ${formatNumber(post.ups)} upvotes</span>
+                <span class="post-stat">💬 ${formatNumber(post.num_comments)} comments</span>
+            </div>`,
+        
+        videoPreview: (post, thumbnail) => {
+            const audioTrack = post.audio_url ? `<source src="${esc(post.audio_url)}" type="audio/mp4">` : '';
+            return `
+                <div class="video-preview" onclick="window.playVideo(this, '${esc(post.video_url)}', '${esc(post.audio_url || '')}')">
+                    <img class="video-thumbnail" src="${esc(thumbnail)}" alt="Video thumbnail" loading="lazy" />
+                    <div class="video-play-overlay">
+                        <div class="video-play-button">▶</div>
                     </div>
-                `;
-            }
-            
-            // Fallback to direct video if no thumbnail
-            return `<video class="post-image" controls preload="metadata"><source src="${esc(post.video_url)}" type="video/mp4"></video>`;
-        }
+                    <video class="post-video" style="display: none;" controls preload="none">
+                        <source src="${esc(post.video_url)}" type="video/mp4">
+                    </video>
+                    ${audioTrack ? `<audio class="post-audio" style="display: none;" preload="none">${audioTrack}</audio>` : ''}
+                </div>`;
+        },
         
-        if (post.gallery && post.gallery.length > 0 && !post.is_video) {
-            if (post.gallery.length === 1) {
-                return `<img class="post-image" src="${esc(post.gallery[0])}" alt="" loading="lazy" />`;
-            }
-            
+        gallery: (post) => {
             const galleryId = `gallery-${post.id}`;
             const imgs = post.gallery.map((url, i) => 
                 `<img class="post-gallery-image ${i === 0 ? 'active' : ''}" src="${esc(url)}" alt="" ${i === 0 ? '' : 'loading="lazy"'} onload="this.classList.add('loaded')" />`
             ).join('');
-            
             const dots = post.gallery.map((_, i) => 
                 `<span class="gallery-dot ${i === 0 ? 'active' : ''}" data-index="${i}"></span>`
             ).join('');
@@ -1789,8 +1772,44 @@
                     <button class="gallery-nav next">›</button>
                     <div class="gallery-indicators">${dots}</div>
                     <div class="gallery-counter">1 / ${post.gallery.length}</div>
-                </div>
-            `;
+                </div>`;
+        }
+    };
+
+    // ============================================================================
+    // POST RENDERING
+    // ============================================================================
+    function createPostHTML(post) {
+        const isBookmarked = state.feeds.starred.posts.some(p => p.id === post.id);
+        
+        return `
+            <div class="post">
+                ${templates.postHeader(post, isBookmarked)}
+                ${templates.postTitle(post)}
+                ${getMediaHTML(post)}
+                ${getTextHTML(post)}
+                ${templates.postFooter(post)}
+            </div>
+        `;
+    }
+
+    function getMediaHTML(post) {
+        if (post.is_video && post.video_url) {
+            const thumbnail = post.gallery && post.gallery[0] ? post.gallery[0] : '';
+            
+            if (thumbnail) {
+                return templates.videoPreview(post, thumbnail);
+            }
+            
+            return `<video class="post-image" controls preload="metadata"><source src="${esc(post.video_url)}" type="video/mp4"></video>`;
+        }
+        
+        if (post.gallery && post.gallery.length > 0 && !post.is_video) {
+            if (post.gallery.length === 1) {
+                return `<img class="post-image" src="${esc(post.gallery[0])}" alt="" loading="lazy" />`;
+            }
+            
+            return templates.gallery(post);
         }
         
         return '';
