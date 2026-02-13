@@ -2128,7 +2128,7 @@
         processSyncQueue();
     }
 
-    function exportSubreddits() {
+    async function exportSubreddits() {
         const data = {
             version: '1.0',
             exportDate: new Date().toISOString(),
@@ -2142,10 +2142,36 @@
         };
         
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        
+        // Try File System Access API first (allows choosing location)
+        if ('showSaveFilePicker' in window) {
+            try {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: 'enpwa-backup.json',
+                    types: [{
+                        description: 'JSON Files',
+                        accept: { 'application/json': ['.json'] }
+                    }]
+                });
+                
+                const writable = await handle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+                
+                showToast('Backup exported!', { type: 'success' });
+                return;
+            } catch (err) {
+                if (err.name === 'AbortError') return; // User cancelled
+                console.error('Save picker error:', err);
+                // Fall back to download
+            }
+        }
+        
+        // Fallback: traditional download with static filename
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `enpwa-backup-${new Date().toISOString().split('T')[0]}.json`;
+        a.download = 'enpwa-backup.json';
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
