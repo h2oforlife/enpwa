@@ -1301,10 +1301,12 @@
         const menuBtn = document.getElementById('menuBtn');
         const closeSidebar = document.getElementById('closeSidebar');
         const overlay = document.getElementById('overlay');
+        const headerTitle = document.getElementById('headerTitle');
         
         if (menuBtn) menuBtn.onclick = toggleSidebar;
         if (closeSidebar) closeSidebar.onclick = toggleSidebar;
         if (overlay) overlay.onclick = toggleSidebar;
+        if (headerTitle) headerTitle.onclick = () => window.location.reload();
         
         // Subreddit management
         const addBtn = document.getElementById('addSubredditBtn');
@@ -1689,17 +1691,15 @@
         
         container.innerHTML = visiblePosts.map(createPostHTML).join('');
         
-        // Add "Load More" button if there are more posts
+        // Add auto-loading button if there are more posts
         if (visiblePosts.length < posts.length) {
             const loadMoreBtn = document.createElement('button');
             loadMoreBtn.className = 'load-more-btn';
-            loadMoreBtn.textContent = `Load More (${posts.length - visiblePosts.length} remaining)`;
-            loadMoreBtn.onclick = () => {
-                state.feeds[state.current].currentPage = (state.feeds[state.current].currentPage || 1) + 1;
-                renderPosts();
-            };
+            loadMoreBtn.innerHTML = `<span class="load-more-spinner"></span> ${posts.length - visiblePosts.length} more posts`;
             loadMoreBtn.style.cssText = `
-                display: block;
+                display: flex;
+                align-items: center;
+                gap: 8px;
                 margin: 20px auto;
                 padding: 12px 24px;
                 background: var(--accent-color);
@@ -1708,9 +1708,52 @@
                 border-radius: 4px;
                 font-size: 14px;
                 font-weight: 500;
-                cursor: pointer;
+                cursor: default;
             `;
+            
+            const spinner = loadMoreBtn.querySelector('.load-more-spinner');
+            spinner.style.cssText = `
+                width: 14px;
+                height: 14px;
+                border-radius: 50%;
+                border: 2px solid transparent;
+                border-top-color: white;
+                border-right-color: white;
+                opacity: 0;
+                transition: opacity 0.2s;
+            `;
+            
             container.appendChild(loadMoreBtn);
+            
+            // Intersection Observer to trigger auto-load
+            let countdownTimer = null;
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        // User sees the button, start countdown
+                        spinner.style.opacity = '1';
+                        spinner.style.animation = 'spin 3s linear';
+                        loadMoreBtn.innerHTML = `<span class="load-more-spinner" style="width: 14px; height: 14px; border-radius: 50%; border: 2px solid transparent; border-top-color: white; border-right-color: white; opacity: 1; animation: spin 3s linear;"></span> Loading more...`;
+                        
+                        countdownTimer = setTimeout(() => {
+                            state.feeds[state.current].currentPage = (state.feeds[state.current].currentPage || 1) + 1;
+                            observer.disconnect();
+                            renderPosts();
+                        }, 3000);
+                    } else {
+                        // User scrolled away, cancel countdown
+                        if (countdownTimer) {
+                            clearTimeout(countdownTimer);
+                            countdownTimer = null;
+                        }
+                        spinner.style.opacity = '0';
+                        spinner.style.animation = 'none';
+                        loadMoreBtn.innerHTML = `<span class="load-more-spinner" style="width: 14px; height: 14px; border-radius: 50%; border: 2px solid transparent; border-top-color: white; border-right-color: white; opacity: 0;"></span> ${posts.length - visiblePosts.length} more posts`;
+                    }
+                });
+            }, { threshold: 0.5 });
+            
+            observer.observe(loadMoreBtn);
         }
     }
 
