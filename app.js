@@ -64,8 +64,25 @@
         selectedCountry: null,
         storageQuota: 5 * 1024 * 1024,
         newPostsToast: null, // Reference to persistent toast
-        updateAvailable: false // Track update availability persistently
+        updateAvailable: false, // Track update availability persistently
+        logs: [] // Activity logs
     };
+    
+    function addLog(message, type = 'info') {
+        const timestamp = new Date().toLocaleString();
+        const logEntry = `${timestamp}: ${message}`;
+        state.logs.unshift(logEntry); // Add to beginning
+        if (state.logs.length > 100) state.logs.pop(); // Keep last 100
+        updateLogDisplay();
+        debouncedSave();
+    }
+    
+    function updateLogDisplay() {
+        const logEl = document.getElementById('activityLog');
+        if (logEl) {
+            logEl.value = state.logs.join('\n');
+        }
+    }
 
     // Periodic task intervals
     let intervals = {
@@ -168,6 +185,7 @@
                 state.current = parsed.currentFeed || 'my';
                 state.syncQueue = parsed.syncQueue || [];
                 state.updateAvailable = parsed.updateAvailable || false;
+                state.logs = parsed.logs || [];
                 
                 // Load pending posts
                 state.feeds.my.pending = parsed.myPending || { posts: [], count: 0 };
@@ -270,7 +288,8 @@
                 popularPending: state.feeds.popular.pending,
                 myLastFetch: state.feeds.my.lastFetch,
                 popularLastFetch: state.feeds.popular.lastFetch,
-                updateAvailable: state.updateAvailable
+                updateAvailable: state.updateAvailable,
+                logs: state.logs
             };
             
             localStorage.setItem('appState', JSON.stringify(toSave));
@@ -682,9 +701,26 @@
             }
             
             // Remove completed jobs
+            const completedJobs = state.syncQueue.filter(j => j.status === 'completed');
+            const failedJobs = state.syncQueue.filter(j => j.status === 'failed_max_retries');
+            
             state.syncQueue = state.syncQueue.filter(j => 
                 j.status !== 'completed' && j.status !== 'failed_max_retries'
             );
+            
+            // Log sync results
+            const myPendingCount = state.feeds.my.pending.count;
+            const popPendingCount = state.feeds.popular.pending.count;
+            
+            if (completedJobs.length > 0) {
+                const totalNew = myPendingCount + popPendingCount;
+                addLog(`Sync complete: ${completedJobs.length} feeds fetched, ${totalNew} new posts`, 'success');
+            }
+            
+            if (failedJobs.length > 0) {
+                const failedNames = failedJobs.map(j => j.type === 'fetch_subreddit' ? `r/${j.subreddit}` : 'Popular').join(', ');
+                addLog(`Failed: ${failedNames}`, 'error');
+            }
             
             console.log(`Queue processing complete. Remaining jobs: ${state.syncQueue.length}`);
             
@@ -1139,6 +1175,7 @@
         
         if (removedCount > 0) {
             console.log(`Removed ${removedCount} posts older than ${CONFIG.MAX_POST_AGE_DAYS} days`);
+            addLog(`Cleanup: Removed ${removedCount} old posts (>${CONFIG.MAX_POST_AGE_DAYS} days)`, 'info');
             saveState();
         }
     }
@@ -2095,7 +2132,14 @@
     };
 
     function refreshPosts() {
+        // Check if already processing
+        if (state.isProcessingQueue) {
+            addLog('Refresh skipped - already syncing', 'info');
+            return;
+        }
+        
         if (!navigator.onLine) {
+            addLog('Offline - updates queued', 'warning');
             showToast('You are offline. Updates queued for when connection is restored.', { type: 'info' });
             // Queue jobs for both feeds when offline
             state.subreddits.forEach(sub => {
@@ -2105,7 +2149,11 @@
             return;
         }
         
-        toggleSidebar();
+        addLog(`Starting refresh for ${state.subreddits.length} subreddits`, 'info');
+        
+        if (document.getElementById('sidebar')?.classList.contains('open')) {
+            toggleSidebar();
+        }
         
         // Always refresh both My Feed and Popular feed
         state.subreddits.forEach(sub => {
@@ -2577,6 +2625,7 @@
     function updateAllDisplays() {
         updateStorageStats();
         updateVersionInfo();
+        updateLogDisplay();
         updateStatusDot(); // Update online/offline status periodically
     }
 
@@ -2598,16 +2647,113 @@
     }
 
     // ============================================================================
+    // PULL TO REFRESH
+    // ============================================================================
+    function setupPullToRefresh() {
+        let startY = 0;
+        let pullDistance = 0;
+        let isPulling = false;
+        let holdTimer = null;
+        const threshold = 80;
+        const maxHeight = 60;
+        const holdDuration = 2000;
+        
+        const indicator = document.getElementById('pullToRefreshIndicator');
+        const spinner = indicator?.querySelector('.pull-refresh-spinner');
+        const text = indicator?.querySelector('span');
+        
+        if (!indicator) return;
+        
+        document.addEventListener('touchstart', (e) => {
+            if (window.scrollY === 0) {
+                startY = e.touches[0].pageY;
+                isPulling = true;
+            }
+        }, { passive: true });
+        
+        document.addEventListener('touchmove', (e) => {
+            if (!isPulling || window.scrollY > 0) return;
+            
+            pullDistance = Math.max(0, e.touches[0].pageY - startY);
+            
+            if (pullDistance > threshold) {
+                // Expand indicator height
+                const height = Math.min(pullDistance - threshold, maxHeight);
+                indicator.style.height = `${height}px`;
+                
+                // Start countdown timer if not already started and fully expanded
+                if (!holdTimer && height >= maxHeight) {
+                    // Start 2-second spinner animation
+                    if (spinner) {
+                        spinner.style.animation = 'none';
+                        // Force reflow to restart animation
+                        void spinner.offsetWidth;
+                        spinner.style.animation = 'spin 2s linear 1';
+                    }
+                    if (text) text.textContent = 'Hold to refresh...';
+                    
+                    holdTimer = setTimeout(() => {
+                        // Trigger refresh after 2 seconds
+                        indicator.style.height = '0';
+                        refreshPosts();
+                        resetPullState();
+                    }, holdDuration);
+                }
+            } else {
+                // Below threshold, collapse and cancel timer
+                cancelPull();
+            }
+        }, { passive: true });
+        
+        document.addEventListener('touchend', () => {
+            // User released before 2 seconds
+            cancelPull();
+        });
+        
+        function cancelPull() {
+            if (holdTimer) {
+                clearTimeout(holdTimer);
+                holdTimer = null;
+            }
+            
+            // Stop spinner animation
+            if (spinner) {
+                spinner.style.animation = 'none';
+            }
+            
+            // Collapse indicator
+            indicator.style.height = '0';
+        }
+        
+        function resetPullState() {
+            if (holdTimer) {
+                clearTimeout(holdTimer);
+                holdTimer = null;
+            }
+            isPulling = false;
+            startY = 0;
+            pullDistance = 0;
+            
+            // Reset spinner
+            if (spinner) {
+                spinner.style.animation = 'none';
+            }
+        }
+    }
+
+    // ============================================================================
     // START APPLICATION
     // ============================================================================
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => {
             initializeApp();
             createScrollToTopButton();
+            setupPullToRefresh();
         });
     } else {
         initializeApp();
         createScrollToTopButton();
+        setupPullToRefresh();
     }
 
 })();
