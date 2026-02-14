@@ -582,17 +582,35 @@
             is_video: post.is_video || false
         };
 
-        // Gallery images
+        // Gallery images - use 640px preview resolution
         if (post.gallery_data && post.media_metadata) {
             result.gallery = post.gallery_data.items.map(item => {
                 const media = post.media_metadata[item.media_id];
+                if (media && media.p) {
+                    // Use preview resolutions around 640px width
+                    const resolutions = media.p;
+                    const mediumRes = resolutions.find(r => r.x >= 640 && r.x <= 960) || 
+                                     resolutions[resolutions.length - 1];
+                    if (mediumRes && mediumRes.u) {
+                        return mediumRes.u.replace(/&amp;/g, '&');
+                    }
+                }
+                // Fallback to source
                 if (media && media.s && media.s.u) {
                     return media.s.u.replace(/&amp;/g, '&');
                 }
                 return null;
             }).filter(Boolean);
-        } else if (post.preview?.images?.[0]?.source?.url) {
-            result.gallery = [post.preview.images[0].source.url.replace(/&amp;/g, '&')];
+        } else if (post.preview?.images?.[0]) {
+            // Use preview resolution around 640px width
+            const preview = post.preview.images[0];
+            const resolutions = preview.resolutions || [];
+            const mediumRes = resolutions.find(r => r.width >= 640 && r.width <= 960) || 
+                             resolutions[resolutions.length - 1] ||
+                             preview.source;
+            if (mediumRes && mediumRes.url) {
+                result.gallery = [mediumRes.url.replace(/&amp;/g, '&')];
+            }
         }
 
         // Video
@@ -1732,14 +1750,14 @@
                     if (entry.isIntersecting) {
                         // User sees the button, start countdown
                         spinner.style.opacity = '1';
-                        spinner.style.animation = 'spin 3s linear';
-                        loadMoreBtn.innerHTML = `<span class="load-more-spinner" style="width: 14px; height: 14px; border-radius: 50%; border: 2px solid transparent; border-top-color: white; border-right-color: white; opacity: 1; animation: spin 3s linear;"></span> Loading more...`;
+                        spinner.style.animation = 'spin 2s linear';
+                        loadMoreBtn.innerHTML = `<span class="load-more-spinner" style="width: 14px; height: 14px; border-radius: 50%; border: 2px solid transparent; border-top-color: white; border-right-color: white; opacity: 1; animation: spin 2s linear;"></span> Loading more...`;
                         
                         countdownTimer = setTimeout(() => {
                             state.feeds[state.current].currentPage = (state.feeds[state.current].currentPage || 1) + 1;
                             observer.disconnect();
                             renderPosts();
-                        }, 3000);
+                        }, 2000);
                     } else {
                         // User scrolled away, cancel countdown
                         if (countdownTimer) {
