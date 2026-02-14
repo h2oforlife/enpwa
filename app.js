@@ -20,7 +20,22 @@
         MAX_SAFE_STORAGE: 8 * 1024 * 1024,
         MAX_POST_AGE_DAYS: 30, // Posts older than this will be deleted
         POSTS_PER_PAGE: 25, // Pagination
-        MAX_POST_TEXT_LENGTH: 300 // Characters before "Read More"
+        MAX_POST_TEXT_LENGTH: 300, // Characters before "Read More"
+        
+        // UI Timings
+        TOAST_DURATION: 3000,
+        TOAST_ANIMATION_DELAY: 10,
+        DIALOG_FADE_DURATION: 300,
+        RELOAD_DELAY: 500,
+        DISPLAY_UPDATE_INTERVAL: 10000,
+        LOAD_MORE_COUNTDOWN: 2000,
+        
+        // Image sizes
+        IMAGE_MIN_WIDTH: 640,
+        IMAGE_MAX_WIDTH: 960,
+        
+        // Scroll
+        SCROLL_TO_TOP_THRESHOLD: 300
     };
 
     // ============================================================================
@@ -330,7 +345,7 @@
             `;
             
             document.body.appendChild(toast);
-            setTimeout(() => toast.classList.add('visible'), 10);
+            setTimeout(() => toast.classList.add('visible'), CONFIG.TOAST_ANIMATION_DELAY);
             
             if (persistent) {
                 state.newPostsToast = toast;
@@ -344,7 +359,7 @@
             toast.textContent = message;
             
             document.body.appendChild(toast);
-            setTimeout(() => toast.classList.add('visible'), 10);
+            setTimeout(() => toast.classList.add('visible'), CONFIG.TOAST_ANIMATION_DELAY);
             
             if (duration > 0) {
                 const timeoutId = setTimeout(() => {
@@ -352,7 +367,7 @@
                     setTimeout(() => {
                         toast.remove();
                         activeToasts.delete(toastId);
-                    }, 300);
+                    }, CONFIG.DIALOG_FADE_DURATION);
                 }, duration);
                 
                 activeToasts.set(toastId, { element: toast, timeout: timeoutId });
@@ -407,7 +422,7 @@
         
         const cleanup = () => {
             dialog.classList.remove('visible');
-            setTimeout(() => dialog.remove(), 300);
+            setTimeout(() => dialog.remove(), CONFIG.DIALOG_FADE_DURATION);
         };
         
         dialog.querySelector('.cancel').onclick = cleanup;
@@ -419,7 +434,7 @@
             if (e.target === dialog) cleanup();
         };
         
-        setTimeout(() => dialog.classList.add('visible'), 10);
+        setTimeout(() => dialog.classList.add('visible'), CONFIG.TOAST_ANIMATION_DELAY);
     }
 
     // ============================================================================
@@ -480,93 +495,6 @@
         }
     }
 
-    // ============================================================================
-    // IMAGE OPTIMIZATION STRATEGY
-    // ============================================================================
-    /*
-    PLAN FOR IMAGE RESIZING AND COMPRESSION:
-    
-    1. TARGET QUALITY:
-       - Max width: 1280px (720p equivalent)
-       - Quality: 75-85% JPEG compression
-       - Format: Convert to WebP where supported (better compression)
-       - Estimated savings: 60-70% file size reduction
-    
-    2. WHEN TO OPTIMIZE:
-       - On fetch: Process images before caching
-       - Use Canvas API for client-side resizing
-       - Compress using canvas.toBlob() with quality parameter
-    
-    3. IMPLEMENTATION APPROACH:
-       
-       async function optimizeImage(imageUrl) {
-           return new Promise((resolve) => {
-               const img = new Image();
-               img.crossOrigin = 'anonymous';
-               img.onload = () => {
-                   const canvas = document.createElement('canvas');
-                   const ctx = canvas.getContext('2d');
-                   
-                   // Calculate new dimensions (max 1280px width)
-                   let width = img.width;
-                   let height = img.height;
-                   const maxWidth = 1280;
-                   
-                   if (width > maxWidth) {
-                       height = (height * maxWidth) / width;
-                       width = maxWidth;
-                   }
-                   
-                   canvas.width = width;
-                   canvas.height = height;
-                   ctx.drawImage(img, 0, 0, width, height);
-                   
-                   // Convert to blob with compression
-                   canvas.toBlob(
-                       (blob) => {
-                           const reader = new FileReader();
-                           reader.onloadend = () => resolve(reader.result);
-                           reader.readAsDataURL(blob);
-                       },
-                       'image/webp', // or 'image/jpeg' for fallback
-                       0.80 // 80% quality
-                   );
-               };
-               img.onerror = () => resolve(imageUrl); // Fallback to original
-               img.src = imageUrl;
-           });
-       }
-    
-    4. WHERE TO INTEGRATE:
-       - Modify stripPostData() to process gallery images
-       - Add optimization step before storing in state.feeds
-       - Store both original URL and optimized data URL
-       - Use optimized version for display, original for full-quality view
-    
-    5. STORAGE CONSIDERATIONS:
-       - Base64 data URLs are ~33% larger than binary
-       - But compression gains offset this
-       - Net result: Still 40-50% total savings
-       - Can store ~2x more images in same space
-    
-    6. PROGRESSIVE ENHANCEMENT:
-       - Try WebP first, fallback to JPEG
-       - Skip optimization if image already small (<200KB)
-       - Add loading indicator during optimization
-       - Cache optimization results to avoid reprocessing
-    
-    7. FUTURE IMPROVEMENTS:
-       - Use IndexedDB for binary blob storage (no Base64 overhead)
-       - Implement lazy loading with intersection observer
-       - Add user setting for quality preference
-       - Background worker for image processing
-    
-    VIDEOS:
-       - Keep current approach (no caching, stream only)
-       - Videos are too large to cache effectively
-       - Reddit video URLs are already optimized
-    */
-
     function stripPostData(post) {
         const result = {
             id: post.id,
@@ -589,7 +517,7 @@
                 if (media && media.p) {
                     // Use preview resolutions around 640px width
                     const resolutions = media.p;
-                    const mediumRes = resolutions.find(r => r.x >= 640 && r.x <= 960) || 
+                    const mediumRes = resolutions.find(r => r.x >= CONFIG.IMAGE_MIN_WIDTH && r.x <= CONFIG.IMAGE_MAX_WIDTH) || 
                                      resolutions[resolutions.length - 1];
                     if (mediumRes && mediumRes.u) {
                         return mediumRes.u.replace(/&amp;/g, '&');
@@ -605,7 +533,7 @@
             // Use preview resolution around 640px width
             const preview = post.preview.images[0];
             const resolutions = preview.resolutions || [];
-            const mediumRes = resolutions.find(r => r.width >= 640 && r.width <= 960) || 
+            const mediumRes = resolutions.find(r => r.width >= CONFIG.IMAGE_MIN_WIDTH && r.width <= CONFIG.IMAGE_MAX_WIDTH) || 
                              resolutions[resolutions.length - 1] ||
                              preview.source;
             if (mediumRes && mediumRes.url) {
@@ -1550,7 +1478,7 @@
             navigator.serviceWorker.controller.postMessage({ type: 'SKIP_WAITING' });
         }
         
-        setTimeout(() => window.location.reload(true), 500);
+        setTimeout(() => window.location.reload(true), CONFIG.RELOAD_DELAY);
     }
 
     // ============================================================================
@@ -1750,14 +1678,14 @@
                     if (entry.isIntersecting) {
                         // User sees the button, start countdown
                         spinner.style.opacity = '1';
-                        spinner.style.animation = 'spin 2s linear';
-                        loadMoreBtn.innerHTML = `<span class="load-more-spinner" style="width: 14px; height: 14px; border-radius: 50%; border: 2px solid transparent; border-top-color: white; border-right-color: white; opacity: 1; animation: spin 2s linear;"></span> Loading more...`;
+                        spinner.style.animation = `spin ${CONFIG.LOAD_MORE_COUNTDOWN / 1000}s linear`;
+                        loadMoreBtn.innerHTML = `<span class="load-more-spinner" style="width: 14px; height: 14px; border-radius: 50%; border: 2px solid transparent; border-top-color: white; border-right-color: white; opacity: 1; animation: spin ${CONFIG.LOAD_MORE_COUNTDOWN / 1000}s linear;"></span> Loading more...`;
                         
                         countdownTimer = setTimeout(() => {
                             state.feeds[state.current].currentPage = (state.feeds[state.current].currentPage || 1) + 1;
                             observer.disconnect();
                             renderPosts();
-                        }, 2000);
+                        }, CONFIG.LOAD_MORE_COUNTDOWN);
                     } else {
                         // User scrolled away, cancel countdown
                         if (countdownTimer) {
@@ -2032,7 +1960,7 @@
         
         // Show/hide button based on scroll position
         window.addEventListener('scroll', () => {
-            if (window.scrollY > 300) {
+            if (window.scrollY > CONFIG.SCROLL_TO_TOP_THRESHOLD) {
                 button.style.display = 'block';
             } else {
                 button.style.display = 'none';
@@ -2625,7 +2553,7 @@
         // Clear existing
         Object.values(intervals).forEach(id => id && clearInterval(id));
         
-        intervals.display = setInterval(updateAllDisplays, 10000);
+        intervals.display = setInterval(updateAllDisplays, CONFIG.DISPLAY_UPDATE_INTERVAL);
         
         if ('serviceWorker' in navigator) {
             intervals.updateCheck = setInterval(checkForUpdates, CONFIG.UPDATE_CHECK_INTERVAL);
