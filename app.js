@@ -1228,6 +1228,11 @@
         // Load state
         loadState();
         
+        // Add startup log
+        if (state.logs.length === 0 || !state.logs[0].includes('App initialized')) {
+            addLog('App initialized', 'info');
+        }
+        
         // Initialize theme
         const savedTheme = localStorage.getItem('theme') || 'light';
         document.documentElement.setAttribute('data-theme', savedTheme);
@@ -2151,10 +2156,6 @@
         
         addLog(`Starting refresh for ${state.subreddits.length} subreddits`, 'info');
         
-        if (document.getElementById('sidebar')?.classList.contains('open')) {
-            toggleSidebar();
-        }
-        
         // Always refresh both My Feed and Popular feed
         state.subreddits.forEach(sub => {
             queueSyncJob('fetch_subreddit', sub);
@@ -2664,6 +2665,9 @@
         
         if (!indicator) return;
         
+        // Disable browser's default pull-to-refresh
+        document.body.style.overscrollBehavior = 'none';
+        
         document.addEventListener('touchstart', (e) => {
             if (window.scrollY === 0) {
                 startY = e.touches[0].pageY;
@@ -2675,6 +2679,11 @@
             if (!isPulling || window.scrollY > 0) return;
             
             pullDistance = Math.max(0, e.touches[0].pageY - startY);
+            
+            // Prevent default browser pull-to-refresh when pulling down
+            if (pullDistance > 0) {
+                e.preventDefault();
+            }
             
             if (pullDistance > threshold) {
                 // Expand indicator height
@@ -2703,7 +2712,7 @@
                 // Below threshold, collapse and cancel timer
                 cancelPull();
             }
-        }, { passive: true });
+        }, { passive: false }); // Changed to non-passive to allow preventDefault
         
         document.addEventListener('touchend', () => {
             // User released before 2 seconds
