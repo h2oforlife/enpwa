@@ -72,7 +72,7 @@
         const timestamp = new Date().toLocaleString();
         const logEntry = `${timestamp}: ${message}`;
         state.logs.unshift(logEntry); // Add to beginning
-        if (state.logs.length > 100) state.logs.pop(); // Keep last 100
+        if (state.logs.length > 20) state.logs.pop(); // Keep last 20
         updateLogDisplay();
         debouncedSave();
     }
