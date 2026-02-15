@@ -799,8 +799,19 @@
         pendingPostsLock = pendingPostsLock.then(() => {
             const feed = state.feeds[feedType];
             
+            // Filter out posts older than MAX_POST_AGE_DAYS
+            const now = Date.now() / 1000;
+            const maxAge = CONFIG.MAX_POST_AGE_DAYS * 24 * 60 * 60;
+            const freshPosts = posts.filter(post => (now - post.created_utc) <= maxAge);
+            
+            if (freshPosts.length < posts.length) {
+                const filtered = posts.length - freshPosts.length;
+                console.log(`Filtered ${filtered} old posts (>${CONFIG.MAX_POST_AGE_DAYS} days)`);
+                addLog(`Filtered ${filtered} old posts from fetch`, 'info');
+            }
+            
             // Use intelligent deduplication
-            const newPosts = getNewPostsOnly(posts, subreddit, feedType);
+            const newPosts = getNewPostsOnly(freshPosts, subreddit, feedType);
             
             if (newPosts.length > 0) {
                 feed.pending.posts = [...feed.pending.posts, ...newPosts];
@@ -819,7 +830,7 @@
                 
                 console.log(`✓ Added ${newPosts.length} new posts to ${feedType}${subreddit ? ` (r/${subreddit})` : ''}`);
             } else {
-                console.log(`✓ No new posts for ${feedType}${subreddit ? ` (r/${subreddit})` : ''} - all ${posts.length} already cached`);
+                console.log(`✓ No new posts for ${feedType}${subreddit ? ` (r/${subreddit})` : ''} - all ${freshPosts.length} already cached`);
             }
         });
         
@@ -1533,8 +1544,11 @@
         overlay && overlay.classList.toggle('active');
         
         if (sidebar && sidebar.classList.contains('open')) {
+            document.body.style.overflow = 'hidden';
             updateStorageStats();
             updateVersionInfo();
+        } else {
+            document.body.style.overflow = '';
         }
     }
 
@@ -2674,10 +2688,20 @@
         
         document.addEventListener('touchstart', (e) => {
             if (window.scrollY === 0) {
+                // Don't interfere with buttons, links, interactive elements, overlay, sidebar, or toasts
+                const target = e.target;
+                if (target.closest('button') || target.closest('a') || target.closest('input') || 
+                    target.closest('textarea') || target.closest('.overlay') || target.closest('.sidebar') ||
+                    target.closest('.update-toast') || target.closest('.toast-message')) {
+                    return;
+                }
+                
                 startY = e.touches[0].pageY;
                 isPulling = true;
+                // Prevent default early to make touchmove cancelable
+                e.preventDefault();
             }
-        }, { passive: true });
+        }, { passive: false });
         
         document.addEventListener('touchmove', (e) => {
             if (!isPulling || window.scrollY > 0) return;
@@ -2719,8 +2743,18 @@
         }, { passive: false }); // Changed to non-passive to allow preventDefault
         
         document.addEventListener('touchend', () => {
-            // User released before 2 seconds
+            // Always cancel pull state on touch end
+            isPulling = false;
+            
+            // Cancel timer if not held long enough
+            if (holdTimer) {
+                clearTimeout(holdTimer);
+                holdTimer = null;
+            }
+            
+            // Always collapse and reset
             cancelPull();
+            resetPullState();
         });
         
         function cancelPull() {
