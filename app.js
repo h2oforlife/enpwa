@@ -711,11 +711,19 @@
             // Log sync results
             const myPendingCount = state.feeds.my.pending.count;
             const popPendingCount = state.feeds.popular.pending.count;
+            const filteredCount = state.syncStats?.filtered || 0;
             
             if (completedJobs.length > 0) {
                 const totalNew = myPendingCount + popPendingCount;
-                addLog(`Sync complete: ${completedJobs.length} feeds fetched, ${totalNew} new posts`, 'success');
+                let logMsg = `Sync complete: ${completedJobs.length} feeds fetched, ${totalNew} new posts`;
+                if (filteredCount > 0) {
+                    logMsg += `, ${filteredCount} filtered by age`;
+                }
+                addLog(logMsg, 'success');
             }
+            
+            // Reset sync stats
+            state.syncStats = { filtered: 0 };
             
             if (failedJobs.length > 0) {
                 const failedNames = failedJobs.map(j => j.type === 'fetch_subreddit' ? `r/${j.subreddit}` : 'Popular').join(', ');
@@ -806,8 +814,10 @@
             
             if (freshPosts.length < posts.length) {
                 const filtered = posts.length - freshPosts.length;
+                // Store filtered count to show in sync summary
+                if (!state.syncStats) state.syncStats = { filtered: 0 };
+                state.syncStats.filtered += filtered;
                 console.log(`Filtered ${filtered} old posts (>${CONFIG.MAX_POST_AGE_DAYS} days)`);
-                addLog(`Filtered ${filtered} old posts from fetch`, 'info');
             }
             
             // Use intelligent deduplication
@@ -1238,11 +1248,6 @@
     async function initializeApp() {
         // Load state
         loadState();
-        
-        // Add startup log
-        if (state.logs.length === 0 || !state.logs[0].includes('App initialized')) {
-            addLog('App initialized', 'info');
-        }
         
         // Initialize theme
         const savedTheme = localStorage.getItem('theme') || 'light';
@@ -2167,6 +2172,9 @@
             queueSyncJob('fetch_popular');
             return;
         }
+        
+        // Reset sync stats
+        state.syncStats = { filtered: 0 };
         
         addLog(`Starting refresh for ${state.subreddits.length} subreddits`, 'info');
         
