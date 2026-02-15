@@ -2673,6 +2673,7 @@
         let pullDistance = 0;
         let isPulling = false;
         let holdTimer = null;
+        let lastY = 0;
         const threshold = 80;
         const maxHeight = 60;
         const holdDuration = 2000;
@@ -2697,21 +2698,30 @@
                 }
                 
                 startY = e.touches[0].pageY;
-                isPulling = true;
-                // Prevent default early to make touchmove cancelable
-                e.preventDefault();
+                lastY = startY;
+                isPulling = false; // Don't set isPulling yet, wait to see direction
             }
         }, { passive: false });
         
         document.addEventListener('touchmove', (e) => {
-            if (!isPulling || window.scrollY > 0) return;
+            if (window.scrollY > 0 || startY === 0) return;
             
-            pullDistance = Math.max(0, e.touches[0].pageY - startY);
+            const currentY = e.touches[0].pageY;
+            const deltaY = currentY - lastY;
+            pullDistance = currentY - startY;
             
-            // Prevent default browser pull-to-refresh when pulling down
+            // If user is swiping down (negative delta), allow scroll
+            if (deltaY < 0 && !isPulling) {
+                return; // Allow normal scroll down
+            }
+            
+            // If pulling down (positive), activate pull-to-refresh
             if (pullDistance > 0) {
+                isPulling = true;
                 e.preventDefault();
             }
+            
+            lastY = currentY;
             
             if (pullDistance > threshold) {
                 // Expand indicator height
