@@ -2156,6 +2156,10 @@
         
         addLog(`Starting refresh for ${state.subreddits.length} subreddits`, 'info');
         
+        if (document.getElementById('sidebar')?.classList.contains('open')) {
+            toggleSidebar();
+        }
+        
         // Always refresh both My Feed and Popular feed
         state.subreddits.forEach(sub => {
             queueSyncJob('fetch_subreddit', sub);
