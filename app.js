@@ -2775,8 +2775,12 @@
                         // Force reflow to restart animation
                         void spinner.offsetWidth;
                         spinner.style.animation = 'spin 2s linear 1';
+                        spinner.style.borderTopColor = '#ff4500';
                     }
-                    if (text) text.textContent = 'Hold to refresh...';
+                    if (text) {
+                        text.textContent = 'Hold to refresh...';
+                        text.style.color = '#ff4500';
+                    }
                     
                     holdTimer = setTimeout(() => {
                         // Trigger refresh after 2 seconds
@@ -2792,18 +2796,16 @@
         }, { passive: false }); // Changed to non-passive to allow preventDefault
         
         document.addEventListener('touchend', () => {
-            // Always cancel pull state on touch end
-            isPulling = false;
+            // Always reset immediately on touchend
+            startY = 0;
+            lastY = 0;
             
-            // Cancel timer if not held long enough
-            if (holdTimer) {
-                clearTimeout(holdTimer);
-                holdTimer = null;
+            // Cancel any active pull
+            if (isPulling) {
+                isPulling = false;
+                cancelPull();
+                resetPullState();
             }
-            
-            // Always collapse and reset
-            cancelPull();
-            resetPullState();
         });
         
         function cancelPull() {
@@ -2830,9 +2832,14 @@
             startY = 0;
             pullDistance = 0;
             
-            // Reset spinner
+            // Reset spinner and text
             if (spinner) {
                 spinner.style.animation = 'none';
+                spinner.style.borderTopColor = '#ff4500';
+            }
+            if (text) {
+                text.textContent = 'Pull to refresh...';
+                text.style.color = '';
             }
         }
     }
