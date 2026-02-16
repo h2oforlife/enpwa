@@ -2775,11 +2775,6 @@
                         // Force reflow to restart animation
                         void spinner.offsetWidth;
                         spinner.style.animation = 'spin 2s linear 1';
-                        spinner.style.borderTopColor = '#ff4500';
-                    }
-                    if (text) {
-                        text.textContent = 'Hold to refresh...';
-                        text.style.color = '#ff4500';
                     }
                     
                     holdTimer = setTimeout(() => {
@@ -2832,14 +2827,9 @@
             startY = 0;
             pullDistance = 0;
             
-            // Reset spinner and text
+            // Reset spinner animation
             if (spinner) {
                 spinner.style.animation = 'none';
-                spinner.style.borderTopColor = '#ff4500';
-            }
-            if (text) {
-                text.textContent = 'Pull to refresh...';
-                text.style.color = '';
             }
         }
     }
