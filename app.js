@@ -293,17 +293,26 @@
             };
             
             localStorage.setItem('appState', JSON.stringify(toSave));
+            
+            // Proactive cleanup if approaching limit (85%)
+            const percent = getStorageUsagePercent();
+            if (percent >= 85) {
+                console.log(`Storage at ${percent.toFixed(1)}% - triggering proactive cleanup`);
+                cleanupOldPosts();
+            }
+            
             return true;
         } catch (error) {
             console.error('Error saving state:', error);
             if (error.name === 'QuotaExceededError') {
-                showToast('Storage full! Cleaning up old posts...', { type: 'warning' });
+                addLog('Storage full - cleaning up old posts', 'warning');
                 cleanupOldPosts();
                 // Try again after cleanup
                 try {
                     localStorage.setItem('appState', JSON.stringify(toSave));
                     return true;
                 } catch (e) {
+                    addLog('Unable to free enough storage space', 'error');
                     return false;
                 }
             }
@@ -1136,27 +1145,49 @@
 
     function cleanupOldPosts() {
         const percent = getStorageUsagePercent();
-        if (percent < CONFIG.CLEANUP_THRESHOLD) return;
+        const targetPercent = 75; // Target to get down to 75%
         
-        console.log(`Storage at ${percent.toFixed(1)}% - cleaning up`);
+        console.log(`Storage at ${percent.toFixed(1)}% - cleaning up to ${targetPercent}%`);
         
         const bookmarkedIds = new Set(state.feeds.starred.posts.map(p => p.id));
-        const removeCount = Math.ceil(state.feeds.my.posts.length * 0.2);
         
-        // Remove oldest non-bookmarked posts (posts are already sorted desc)
+        // Calculate how many posts to remove to reach target
+        const currentSize = getLocalStorageSize();
+        const targetSize = (state.storageQuota * targetPercent) / 100;
+        const bytesToRemove = currentSize - targetSize;
+        
+        if (bytesToRemove <= 0) {
+            console.log('No cleanup needed');
+            return;
+        }
+        
+        // Estimate: average post is ~2KB (adjust based on your data)
+        const avgPostSize = 2048;
+        const postsToRemove = Math.ceil(bytesToRemove / avgPostSize);
+        
+        // Remove oldest non-bookmarked posts (posts are sorted newest first)
         const removedIds = new Set();
-        for (let i = state.feeds.my.posts.length - 1; i >= 0 && removedIds.size < removeCount; i--) {
-            const post = state.feeds.my.posts[i];
+        const allPosts = [...state.feeds.my.posts, ...state.feeds.popular.posts]
+            .sort((a, b) => a.created_utc - b.created_utc); // Oldest first
+        
+        for (let post of allPosts) {
+            if (removedIds.size >= postsToRemove) break;
             if (!bookmarkedIds.has(post.id)) {
                 removedIds.add(post.id);
             }
         }
         
+        const beforeCount = state.feeds.my.posts.length + state.feeds.popular.posts.length;
         state.feeds.my.posts = state.feeds.my.posts.filter(p => !removedIds.has(p.id));
         state.feeds.popular.posts = state.feeds.popular.posts.filter(p => !removedIds.has(p.id));
+        rebuildPopularFiltered();
         
         saveState();
-        console.log(`Removed ${removedIds.size} posts. New: ${getStorageUsagePercent().toFixed(1)}%`);
+        
+        const afterPercent = getStorageUsagePercent();
+        const afterCount = state.feeds.my.posts.length + state.feeds.popular.posts.length;
+        console.log(`Cleaned up: ${beforeCount - afterCount} posts removed. Storage: ${percent.toFixed(1)}% → ${afterPercent.toFixed(1)}%`);
+        addLog(`Storage cleanup: ${beforeCount - afterCount} posts removed (${percent.toFixed(0)}% → ${afterPercent.toFixed(0)}%)`, 'info');
     }
 
     function cleanupOldPostsByAge() {
