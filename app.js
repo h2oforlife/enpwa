@@ -234,9 +234,6 @@
         
         // Validate and clean up sync queue
         validateSyncQueue();
-        
-        // Clean old posts after loading
-        cleanupOldPostsByAge();
     }
 
     function validateSyncQueue() {
@@ -1242,7 +1239,7 @@
         const postsPerSubEl = document.getElementById('postsPerSub');
         
         if (usageEl) {
-            usageEl.textContent = `${formatBytes(size)} / ${formatBytes(state.storageQuota)}`;
+            usageEl.textContent = `${formatBytes(size)} / ${formatBytes(state.storageQuota)} (${percent.toFixed(0)}%)`;
         }
         
         if (barEl) {
