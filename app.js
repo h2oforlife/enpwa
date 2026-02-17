@@ -65,8 +65,7 @@
         storageQuota: 5 * 1024 * 1024,
         newPostsToast: null, // Reference to persistent toast
         updateAvailable: false, // Track update availability persistently
-        logs: [], // Activity logs
-        popularLocation: 'GLOBAL' // Popular feed geo filter
+        logs: [] // Activity logs
     };
     
     function addLog(message, type = 'info') {
@@ -187,7 +186,6 @@
                 state.syncQueue = parsed.syncQueue || [];
                 state.updateAvailable = parsed.updateAvailable || false;
                 state.logs = parsed.logs || [];
-                state.popularLocation = parsed.popularLocation || 'GLOBAL';
                 
                 // Load pending posts
                 state.feeds.my.pending = parsed.myPending || { posts: [], count: 0 };
@@ -288,8 +286,7 @@
                 myLastFetch: state.feeds.my.lastFetch,
                 popularLastFetch: state.feeds.popular.lastFetch,
                 updateAvailable: state.updateAvailable,
-                logs: state.logs,
-                popularLocation: state.popularLocation
+                logs: state.logs
             };
             
             localStorage.setItem('appState', JSON.stringify(toSave));
@@ -868,11 +865,7 @@
                 // Build URL
                 let url;
                 if (feedType === 'popular') {
-                    // Popular feed uses /best.json with optional geo_filter
                     url = `https://www.reddit.com/r/popular/best.json?limit=${CONFIG.POSTS_LIMIT}&raw_json=1`;
-                    if (state.popularLocation !== 'GLOBAL') {
-                        url += `&geo_filter=${state.popularLocation.toLowerCase()}`;
-                    }
                 } else {
                     // Subreddit feed
                     url = `https://www.reddit.com/r/${subreddit}.json?limit=${CONFIG.POSTS_LIMIT}&raw_json=1`;
@@ -1395,30 +1388,6 @@
         const themeToggle = document.getElementById('themeToggle');
         if (themeToggle) themeToggle.onclick = toggleTheme;
         
-        // Popular location selector
-        const locationSelect = document.getElementById('popularLocationSelect');
-        if (locationSelect) {
-            locationSelect.value = state.popularLocation;
-            locationSelect.onchange = (e) => {
-                const oldLocation = state.popularLocation;
-                state.popularLocation = e.target.value;
-                
-                // Clear popular feed cache when location changes
-                state.feeds.popular.posts = [];
-                state.feeds.popular.pending = { posts: [], count: 0 };
-                state.feeds.popular.filtered = [];
-                state.feeds.popular.lastFetch = {};
-                
-                saveState();
-                addLog(`Popular feed location changed to ${e.target.options[e.target.selectedIndex].text}`, 'info');
-                
-                // Re-render if on popular feed
-                if (state.current === 'popular') {
-                    renderPosts();
-                }
-            };
-        }
-        
         // Update button
         const updateBtn = document.getElementById('updateButton');
         if (updateBtn) updateBtn.onclick = updatePWA;
@@ -1589,6 +1558,7 @@
         const notification = document.getElementById('updateNotification');
         if (notification) notification.classList.add('active');
     }
+
 
     function toggleTheme() {
         const current = document.documentElement.getAttribute('data-theme');
