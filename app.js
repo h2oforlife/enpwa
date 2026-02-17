@@ -2778,6 +2778,17 @@
     // AUTO-REFRESH DETECTION
     // ============================================================================
     function checkAndTriggerAutoRefresh() {
+        // Check if enough time has passed since last sync (5 minutes)
+        const lastSync = localStorage.getItem('lastSyncTime');
+        const now = Date.now();
+        const fiveMinutes = 5 * 60 * 1000;
+        const timeSinceLastSync = lastSync ? (now - parseInt(lastSync)) : Infinity;
+        
+        if (timeSinceLastSync < fiveMinutes) {
+            // Too soon since last sync, skip
+            return;
+        }
+        
         // Detect if this is a page reload or cold start
         const navigationType = performance.getEntriesByType('navigation')[0]?.type;
         
@@ -2789,14 +2800,8 @@
             }
         } else if (state.autoRefreshOnStart && navigator.onLine) {
             // Cold start or initial load
-            const lastSync = localStorage.getItem('lastSyncTime');
-            const now = Date.now();
-            
-            // Only auto-refresh if it's been more than 5 minutes since last sync
-            if (!lastSync || (now - parseInt(lastSync)) > 5 * 60 * 1000) {
-                addLog('App started - triggering feed refresh', 'info');
-                setTimeout(() => refreshPosts(), 500);
-            }
+            addLog('App started - triggering feed refresh', 'info');
+            setTimeout(() => refreshPosts(), 500);
         }
     }
 
