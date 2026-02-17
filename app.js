@@ -2786,8 +2786,9 @@
                 const height = Math.min(pullDistance - threshold, maxHeight);
                 indicator.style.height = `${height}px`;
                 
-                // If user pushes back up below max height, cancel timer
-                if (holdTimer && height < maxHeight) {
+                // Only cancel timer if user pulls back significantly (20px tolerance)
+                // This prevents cancellation from tiny finger movements
+                if (holdTimer && height < maxHeight - 20) {
                     clearTimeout(holdTimer);
                     holdTimer = null;
                     if (spinner) spinner.style.animation = 'none';
