@@ -65,7 +65,9 @@
         storageQuota: 5 * 1024 * 1024,
         newPostsToast: null, // Reference to persistent toast
         updateAvailable: false, // Track update availability persistently
-        logs: [] // Activity logs
+        logs: [], // Activity logs
+        autoRefreshOnStart: false, // Auto-refresh feeds when app opens (cold start)
+        refreshOnPageReload: false // Refresh feeds when page is refreshed
     };
     
     function addLog(message, type = 'info') {
@@ -186,6 +188,8 @@
                 state.syncQueue = parsed.syncQueue || [];
                 state.updateAvailable = parsed.updateAvailable || false;
                 state.logs = parsed.logs || [];
+                state.autoRefreshOnStart = parsed.autoRefreshOnStart || false;
+                state.refreshOnPageReload = parsed.refreshOnPageReload || false;
                 
                 // Load pending posts
                 state.feeds.my.pending = parsed.myPending || { posts: [], count: 0 };
@@ -286,7 +290,9 @@
                 myLastFetch: state.feeds.my.lastFetch,
                 popularLastFetch: state.feeds.popular.lastFetch,
                 updateAvailable: state.updateAvailable,
-                logs: state.logs
+                logs: state.logs,
+                autoRefreshOnStart: state.autoRefreshOnStart,
+                refreshOnPageReload: state.refreshOnPageReload
             };
             
             localStorage.setItem('appState', JSON.stringify(toSave));
@@ -1388,6 +1394,30 @@
         const themeToggle = document.getElementById('themeToggle');
         if (themeToggle) themeToggle.onclick = toggleTheme;
         
+        // Auto-refresh toggles
+        const autoRefreshStartToggle = document.getElementById('autoRefreshStartToggle');
+        const refreshOnReloadToggle = document.getElementById('refreshOnReloadToggle');
+        
+        if (autoRefreshStartToggle) {
+            updateToggleButton(autoRefreshStartToggle, state.autoRefreshOnStart);
+            autoRefreshStartToggle.onclick = () => {
+                state.autoRefreshOnStart = !state.autoRefreshOnStart;
+                updateToggleButton(autoRefreshStartToggle, state.autoRefreshOnStart);
+                saveState();
+                addLog(`Auto-refresh on start: ${state.autoRefreshOnStart ? 'ON' : 'OFF'}`, 'info');
+            };
+        }
+        
+        if (refreshOnReloadToggle) {
+            updateToggleButton(refreshOnReloadToggle, state.refreshOnPageReload);
+            refreshOnReloadToggle.onclick = () => {
+                state.refreshOnPageReload = !state.refreshOnPageReload;
+                updateToggleButton(refreshOnReloadToggle, state.refreshOnPageReload);
+                saveState();
+                addLog(`Refresh on page reload: ${state.refreshOnPageReload ? 'ON' : 'OFF'}`, 'info');
+            };
+        }
+        
         // Update button
         const updateBtn = document.getElementById('updateButton');
         if (updateBtn) updateBtn.onclick = updatePWA;
@@ -1559,6 +1589,24 @@
         if (notification) notification.classList.add('active');
     }
 
+    function updateToggleButton(button, isOn) {
+        if (!button) return;
+        
+        const statusEl = button.querySelector('div:last-child');
+        if (statusEl) {
+            statusEl.textContent = isOn ? 'ON' : 'OFF';
+        }
+        
+        if (isOn) {
+            button.style.background = '#ff4500';
+            button.style.color = 'white';
+            button.style.borderColor = '#ff4500';
+        } else {
+            button.style.background = 'var(--input-bg)';
+            button.style.color = 'var(--text-primary)';
+            button.style.borderColor = 'var(--border-color)';
+        }
+    }
 
     function toggleTheme() {
         const current = document.documentElement.getAttribute('data-theme');
@@ -2240,6 +2288,9 @@
         
         // Start processing queue immediately
         processSyncQueue();
+        
+        // Track last sync time for auto-refresh logic
+        localStorage.setItem('lastSyncTime', Date.now().toString());
     }
 
     async function exportSubreddits() {
@@ -2724,164 +2775,27 @@
     }
 
     // ============================================================================
-    // PULL TO REFRESH
+    // AUTO-REFRESH DETECTION
     // ============================================================================
-    function setupPullToRefresh() {
-        let startY = 0;
-        let pullDistance = 0;
-        let isPulling = false;
-        let holdTimer = null;
-        let lastY = 0;
-        const threshold = 80;
-        const maxHeight = 60;
-        const holdDuration = 2000;
+    function checkAndTriggerAutoRefresh() {
+        // Detect if this is a page reload or cold start
+        const navigationType = performance.getEntriesByType('navigation')[0]?.type;
         
-        const indicator = document.getElementById('pullToRefreshIndicator');
-        const spinner = indicator?.querySelector('.pull-refresh-spinner');
-        const text = indicator?.querySelector('span');
-        
-        if (!indicator) return;
-        
-        // Disable browser's default pull-to-refresh
-        document.body.style.overscrollBehavior = 'none';
-        
-        document.addEventListener('touchstart', (e) => {
-            if (window.scrollY === 0) {
-                // Don't interfere with buttons, links, interactive elements, overlay, sidebar, or toasts
-                const target = e.target;
-                if (target.closest('button') || target.closest('a') || target.closest('input') || 
-                    target.closest('textarea') || target.closest('.overlay') || target.closest('.sidebar') ||
-                    target.closest('.update-toast') || target.closest('.toast-message')) {
-                    return;
-                }
-                
-                startY = e.touches[0].pageY;
-                lastY = startY;
-                isPulling = false; // Don't set isPulling yet, wait to see direction
+        if (navigationType === 'reload' && state.refreshOnPageReload) {
+            // Page was refreshed (pull-to-refresh in browser)
+            addLog('Page reloaded - triggering feed refresh', 'info');
+            if (navigator.onLine) {
+                setTimeout(() => refreshPosts(), 500);
             }
-        }, { passive: false });
-        
-        document.addEventListener('touchmove', (e) => {
-            if (window.scrollY > 0 || startY === 0) return;
+        } else if (state.autoRefreshOnStart && navigator.onLine) {
+            // Cold start or initial load
+            const lastSync = localStorage.getItem('lastSyncTime');
+            const now = Date.now();
             
-            const currentY = e.touches[0].pageY;
-            const deltaY = currentY - lastY;
-            pullDistance = currentY - startY;
-            
-            // If user is swiping down (negative delta), allow scroll
-            if (deltaY < 0 && !isPulling) {
-                return; // Allow normal scroll down
-            }
-            
-            // If pulling down (positive), activate pull-to-refresh
-            if (pullDistance > 0) {
-                isPulling = true;
-                e.preventDefault();
-            }
-            
-            lastY = currentY;
-            
-            if (pullDistance > threshold) {
-                // Expand indicator height
-                const height = Math.min(pullDistance - threshold, maxHeight);
-                indicator.style.height = `${height}px`;
-                
-                // Only cancel timer if user pulls back significantly (20px tolerance)
-                // This prevents cancellation from tiny finger movements
-                if (holdTimer && height < maxHeight - 20) {
-                    clearTimeout(holdTimer);
-                    holdTimer = null;
-                    if (spinner) spinner.style.animation = 'none';
-                }
-                
-                // Start countdown timer if not already started and fully expanded
-                if (!holdTimer && height >= maxHeight) {
-                    // Start 2-second spinner animation
-                    if (spinner) {
-                        spinner.style.animation = 'none';
-                        // Force reflow to restart animation
-                        void spinner.offsetWidth;
-                        spinner.style.animation = 'spin 2s linear 1';
-                    }
-                    
-                    holdTimer = setTimeout(() => {
-                        // Trigger refresh after 2 seconds
-                        indicator.style.height = '0';
-                        refreshPosts();
-                        resetPullState();
-                    }, holdDuration);
-                }
-            } else {
-                // Below threshold, collapse and cancel timer
-                cancelPull();
-            }
-        }, { passive: false }); // Changed to non-passive to allow preventDefault
-        
-        document.addEventListener('touchend', () => {
-            // Always cancel timer immediately when finger lifts
-            if (holdTimer) {
-                clearTimeout(holdTimer);
-                holdTimer = null;
-            }
-            
-            // Stop spinner
-            if (spinner) {
-                spinner.style.animation = 'none';
-            }
-            
-            // Collapse indicator
-            indicator.style.height = '0';
-            
-            // Reset all state
-            isPulling = false;
-            startY = 0;
-            lastY = 0;
-            pullDistance = 0;
-        });
-        
-        document.addEventListener('touchcancel', () => {
-            // Also handle touchcancel (system interruption)
-            if (holdTimer) {
-                clearTimeout(holdTimer);
-                holdTimer = null;
-            }
-            if (spinner) {
-                spinner.style.animation = 'none';
-            }
-            indicator.style.height = '0';
-            isPulling = false;
-            startY = 0;
-            lastY = 0;
-            pullDistance = 0;
-        });
-        
-        function cancelPull() {
-            if (holdTimer) {
-                clearTimeout(holdTimer);
-                holdTimer = null;
-            }
-            
-            // Stop spinner animation
-            if (spinner) {
-                spinner.style.animation = 'none';
-            }
-            
-            // Collapse indicator
-            indicator.style.height = '0';
-        }
-        
-        function resetPullState() {
-            if (holdTimer) {
-                clearTimeout(holdTimer);
-                holdTimer = null;
-            }
-            isPulling = false;
-            startY = 0;
-            pullDistance = 0;
-            
-            // Reset spinner animation
-            if (spinner) {
-                spinner.style.animation = 'none';
+            // Only auto-refresh if it's been more than 5 minutes since last sync
+            if (!lastSync || (now - parseInt(lastSync)) > 5 * 60 * 1000) {
+                addLog('App started - triggering feed refresh', 'info');
+                setTimeout(() => refreshPosts(), 500);
             }
         }
     }
@@ -2893,12 +2807,12 @@
         document.addEventListener('DOMContentLoaded', () => {
             initializeApp();
             createScrollToTopButton();
-            setupPullToRefresh();
+            checkAndTriggerAutoRefresh();
         });
     } else {
         initializeApp();
         createScrollToTopButton();
-        setupPullToRefresh();
+        checkAndTriggerAutoRefresh();
     }
 
 })();
