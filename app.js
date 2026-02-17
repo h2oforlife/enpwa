@@ -1141,26 +1141,38 @@
     }
 
     function cleanupOldPosts() {
+        // Prevent recursive cleanup
+        if (cleanupOldPosts.running) {
+            console.log('Cleanup already running, skipping');
+            return;
+        }
+        cleanupOldPosts.running = true;
+        
         const percent = getStorageUsagePercent();
-        const targetPercent = 75; // Target to get down to 75%
+        const targetPercent = 80; // Target 80% to keep more posts with safe buffer
         
         console.log(`Storage at ${percent.toFixed(1)}% - cleaning up to ${targetPercent}%`);
         
         const bookmarkedIds = new Set(state.feeds.starred.posts.map(p => p.id));
         
-        // Calculate how many posts to remove to reach target
+        // Calculate actual average post size
         const currentSize = getLocalStorageSize();
+        const totalPosts = state.feeds.my.posts.length + state.feeds.popular.posts.length;
+        const avgPostSize = totalPosts > 0 ? currentSize / totalPosts : 2048;
+        
         const targetSize = (state.storageQuota * targetPercent) / 100;
         const bytesToRemove = currentSize - targetSize;
         
         if (bytesToRemove <= 0) {
             console.log('No cleanup needed');
+            cleanupOldPosts.running = false;
             return;
         }
         
-        // Estimate: average post is ~2KB (adjust based on your data)
-        const avgPostSize = 2048;
-        const postsToRemove = Math.ceil(bytesToRemove / avgPostSize);
+        // Calculate posts to remove, add 10% buffer to ensure we hit target
+        const postsToRemove = Math.ceil((bytesToRemove / avgPostSize) * 1.1);
+        
+        console.log(`Need to remove ${formatBytes(bytesToRemove)}, estimated ${postsToRemove} posts (avg ${formatBytes(avgPostSize)}/post)`);
         
         // Remove oldest non-bookmarked posts (posts are sorted newest first)
         const removedIds = new Set();
@@ -1179,12 +1191,14 @@
         state.feeds.popular.posts = state.feeds.popular.posts.filter(p => !removedIds.has(p.id));
         rebuildPopularFiltered();
         
-        saveState();
+        // Don't call saveState() here to avoid recursion - let caller handle it
         
         const afterPercent = getStorageUsagePercent();
         const afterCount = state.feeds.my.posts.length + state.feeds.popular.posts.length;
         console.log(`Cleaned up: ${beforeCount - afterCount} posts removed. Storage: ${percent.toFixed(1)}% → ${afterPercent.toFixed(1)}%`);
         addLog(`Storage cleanup: ${beforeCount - afterCount} posts removed (${percent.toFixed(0)}% → ${afterPercent.toFixed(0)}%)`, 'info');
+        
+        cleanupOldPosts.running = false;
     }
 
     function cleanupOldPostsByAge() {
