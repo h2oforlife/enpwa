@@ -2778,6 +2778,13 @@
                 const height = Math.min(pullDistance - threshold, maxHeight);
                 indicator.style.height = `${height}px`;
                 
+                // If user pushes back up below max height, cancel timer
+                if (holdTimer && height < maxHeight) {
+                    clearTimeout(holdTimer);
+                    holdTimer = null;
+                    if (spinner) spinner.style.animation = 'none';
+                }
+                
                 // Start countdown timer if not already started and fully expanded
                 if (!holdTimer && height >= maxHeight) {
                     // Start 2-second spinner animation
@@ -2802,16 +2809,41 @@
         }, { passive: false }); // Changed to non-passive to allow preventDefault
         
         document.addEventListener('touchend', () => {
-            // Always reset immediately on touchend
+            // Always cancel timer immediately when finger lifts
+            if (holdTimer) {
+                clearTimeout(holdTimer);
+                holdTimer = null;
+            }
+            
+            // Stop spinner
+            if (spinner) {
+                spinner.style.animation = 'none';
+            }
+            
+            // Collapse indicator
+            indicator.style.height = '0';
+            
+            // Reset all state
+            isPulling = false;
             startY = 0;
             lastY = 0;
-            
-            // Cancel any active pull
-            if (isPulling) {
-                isPulling = false;
-                cancelPull();
-                resetPullState();
+            pullDistance = 0;
+        });
+        
+        document.addEventListener('touchcancel', () => {
+            // Also handle touchcancel (system interruption)
+            if (holdTimer) {
+                clearTimeout(holdTimer);
+                holdTimer = null;
             }
+            if (spinner) {
+                spinner.style.animation = 'none';
+            }
+            indicator.style.height = '0';
+            isPulling = false;
+            startY = 0;
+            lastY = 0;
+            pullDistance = 0;
         });
         
         function cancelPull() {
