@@ -17,7 +17,7 @@
         REQUEST_TIMEOUT: 15000,
         CLEANUP_THRESHOLD: 90, // Only cleanup when storage is 90%+ full
         JOB_DELAY_MS: 1000,
-        MAX_SAFE_STORAGE: 8 * 1024 * 1024,
+        MAX_SAFE_STORAGE: 4 * 1024 * 1024, // 4MB - conservative cap for mobile Safari localStorage (~5MB hard limit)
         MAX_POST_AGE_DAYS: 30, // Posts older than this will be deleted
         POSTS_PER_PAGE: 25, // Pagination
         MAX_POST_TEXT_LENGTH: 300, // Characters before "Read More"
@@ -202,21 +202,7 @@
                 // Build filtered cache for popular feed
                 rebuildPopularFiltered();
                 
-                // Fix rate limit state corruption
-                if (parsed.rateLimitState) {
-                    const now = Date.now();
-                    if (now >= parsed.rateLimitState.resetTime) {
-                        // Expired, reset
-                        state.rateLimitState = {
-                            lastRequestTime: 0,
-                            remainingRequests: CONFIG.REQUESTS_PER_MINUTE,
-                            resetTime: now + CONFIG.RATE_LIMIT_RESET_INTERVAL,
-                            requestCount: 0
-                        };
-                    } else {
-                        state.rateLimitState = parsed.rateLimitState;
-                    }
-                }
+                // Rate limit state is intentionally not persisted - always reset to fresh on load
                 
                 // Clean up stuck jobs from previous session
                 state.syncQueue = state.syncQueue.map(job => {
@@ -274,27 +260,28 @@
     }
 
     function saveState() {
+        // Build save object outside try/catch so it's accessible in catch block
+        const toSave = {
+            cachedPosts: state.feeds.my.posts,
+            popularPosts: state.feeds.popular.posts,
+            bookmarkedPosts: state.feeds.starred.posts,
+            subreddits: state.subreddits,
+            blockedSubreddits: state.blocked,
+            blockedUsers: state.blockedUsers,
+            currentFeed: state.current,
+            // Intentionally NOT saving rateLimitState - it's ephemeral, no need to persist
+            syncQueue: state.syncQueue,
+            myPending: state.feeds.my.pending,
+            popularPending: state.feeds.popular.pending,
+            myLastFetch: state.feeds.my.lastFetch,
+            popularLastFetch: state.feeds.popular.lastFetch,
+            updateAvailable: state.updateAvailable,
+            logs: state.logs,
+            autoRefreshOnStart: state.autoRefreshOnStart,
+            refreshOnPageReload: state.refreshOnPageReload
+        };
+
         try {
-            const toSave = {
-                cachedPosts: state.feeds.my.posts,
-                popularPosts: state.feeds.popular.posts,
-                bookmarkedPosts: state.feeds.starred.posts,
-                subreddits: state.subreddits,
-                blockedSubreddits: state.blocked,
-                blockedUsers: state.blockedUsers,
-                currentFeed: state.current,
-                rateLimitState: state.rateLimitState,
-                syncQueue: state.syncQueue,
-                myPending: state.feeds.my.pending,
-                popularPending: state.feeds.popular.pending,
-                myLastFetch: state.feeds.my.lastFetch,
-                popularLastFetch: state.feeds.popular.lastFetch,
-                updateAvailable: state.updateAvailable,
-                logs: state.logs,
-                autoRefreshOnStart: state.autoRefreshOnStart,
-                refreshOnPageReload: state.refreshOnPageReload
-            };
-            
             localStorage.setItem('appState', JSON.stringify(toSave));
             
             // Proactive cleanup if approaching limit (85%)
@@ -310,7 +297,7 @@
             if (error.name === 'QuotaExceededError') {
                 addLog('Storage full - cleaning up old posts', 'warning');
                 cleanupOldPosts();
-                // Try again after cleanup
+                // Try again after cleanup - toSave is in scope here now
                 try {
                     localStorage.setItem('appState', JSON.stringify(toSave));
                     return true;
@@ -468,64 +455,6 @@
         setTimeout(() => dialog.classList.add('visible'), CONFIG.TOAST_ANIMATION_DELAY);
     }
 
-    // ============================================================================
-    // UNIFIED FETCH FUNCTION - Consolidates all fetch operations
-    // ============================================================================
-    async function fetchFeed(feedType, subreddit = null) {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), CONFIG.REQUEST_TIMEOUT);
-        
-        try {
-            // Wait for rate limit
-            await waitForRateLimit();
-            
-            // Build URL
-            const sub = feedType === 'popular' ? 'popular' : subreddit;
-            const url = `https://www.reddit.com/r/${sub}.json?limit=${CONFIG.POSTS_LIMIT}&raw_json=1`;
-            
-            // Fetch with timeout
-            const response = await fetch(url, { signal: controller.signal });
-            clearTimeout(timeoutId);
-            
-            // Update rate limit
-            state.rateLimitState.lastRequestTime = Date.now();
-            state.rateLimitState.remainingRequests = Math.max(0, state.rateLimitState.remainingRequests - 1);
-            state.rateLimitState.requestCount++;
-            
-            // Update from headers if available
-            const remaining = response.headers.get('X-Ratelimit-Remaining');
-            const reset = response.headers.get('X-Ratelimit-Reset');
-            if (remaining !== null) state.rateLimitState.remainingRequests = parseInt(remaining, 10);
-            if (reset !== null) state.rateLimitState.resetTime = parseInt(reset, 10) * 1000;
-            
-            debouncedSave();
-            
-            // Handle rate limit
-            if (response.status === 429) {
-                throw new Error('Rate limited');
-            }
-            
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-            
-            // Parse and return posts
-            const data = await response.json();
-            const posts = data.data.children.map(child => stripPostData(child.data));
-            
-            return { posts, error: null };
-            
-        } catch (error) {
-            clearTimeout(timeoutId);
-            
-            if (error.name === 'AbortError') {
-                return { posts: null, error: 'Request timeout' };
-            }
-            
-            return { posts: null, error: error.message };
-        }
-    }
-
     function stripPostData(post) {
         const result = {
             id: post.id,
@@ -595,7 +524,7 @@
                 state.rateLimitState.remainingRequests = CONFIG.REQUESTS_PER_MINUTE;
                 state.rateLimitState.resetTime = now + CONFIG.RATE_LIMIT_RESET_INTERVAL;
                 state.rateLimitState.requestCount = 0;
-                debouncedSave();
+                // No save needed - rate limit state is intentionally ephemeral
             }
             
             // Check if we can proceed
@@ -743,7 +672,37 @@
             }
             
             console.log(`Queue processing complete. Remaining jobs: ${state.syncQueue.length}`);
+
+            // Auto-apply pending posts for initially empty feeds
+            if (state.feeds.my.posts.length === 0 && state.feeds.my.pending.posts.length > 0) {
+                console.log('Initial My Feed fetch complete - auto-applying posts');
+                const allPosts = [...state.feeds.my.pending.posts, ...state.feeds.my.posts];
+                state.feeds.my.posts = removeDuplicates(allPosts).sort((a, b) => b.created_utc - a.created_utc);
+                state.feeds.my.pending = { posts: [], count: 0 };
+                saveState();
+                if (state.current === 'my') renderPosts();
+            }
             
+            if (state.feeds.popular.posts.length === 0 && state.feeds.popular.pending.posts.length > 0) {
+                console.log('Initial Popular feed fetch complete - auto-applying posts');
+                const allPosts = [...state.feeds.popular.pending.posts, ...state.feeds.popular.posts];
+                state.feeds.popular.posts = removeDuplicates(allPosts).sort((a, b) => b.created_utc - a.created_utc);
+                state.feeds.popular.pending = { posts: [], count: 0 };
+                rebuildPopularFiltered();
+                saveState();
+                if (state.current === 'popular') renderPosts();
+            }
+            
+            // Show toast for non-empty feeds that have pending posts waiting
+            const myHasPosts = state.feeds.my.posts.length > 0;
+            const popHasPosts = state.feeds.popular.posts.length > 0;
+            const myHasPending = state.feeds.my.pending.posts.length > 0;
+            const popHasPending = state.feeds.popular.pending.posts.length > 0;
+            
+            if ((myHasPosts && myHasPending) || (popHasPosts && popHasPending)) {
+                showNewPostsToast();
+            }
+
         } catch (error) {
             console.error('Error in processSyncQueue:', error);
         } finally {
@@ -755,37 +714,6 @@
             
             // Save state after sync completes
             saveState();
-        }
-        
-        // Check if this was initial fetch - auto apply pending posts for empty feeds
-        if (state.feeds.my.posts.length === 0 && state.feeds.my.pending.posts.length > 0) {
-            console.log('Initial My Feed fetch complete - auto-applying posts');
-            const allPosts = [...state.feeds.my.pending.posts, ...state.feeds.my.posts];
-            state.feeds.my.posts = removeDuplicates(allPosts).sort((a, b) => b.created_utc - a.created_utc);
-            state.feeds.my.pending = { posts: [], count: 0 };
-            saveState();
-            if (state.current === 'my') renderPosts();
-        }
-        
-        if (state.feeds.popular.posts.length === 0 && state.feeds.popular.pending.posts.length > 0) {
-            console.log('Initial Popular feed fetch complete - auto-applying posts');
-            const allPosts = [...state.feeds.popular.pending.posts, ...state.feeds.popular.posts];
-            state.feeds.popular.posts = removeDuplicates(allPosts).sort((a, b) => b.created_utc - a.created_utc);
-            state.feeds.popular.pending = { posts: [], count: 0 };
-            // Update filtered cache
-            rebuildPopularFiltered();
-            saveState();
-            if (state.current === 'popular') renderPosts();
-        }
-        
-        // Show toast for non-empty feeds with pending posts
-        const myHasPosts = state.feeds.my.posts.length > 0;
-        const popHasPosts = state.feeds.popular.posts.length > 0;
-        const myHasPending = state.feeds.my.pending.posts.length > 0;
-        const popHasPending = state.feeds.popular.pending.posts.length > 0;
-        
-        if ((myHasPosts && myHasPending) || (popHasPosts && popHasPending)) {
-            showNewPostsToast();
         }
     }
 
@@ -893,8 +821,6 @@
                 
                 // Update from headers if available
                 updateRateLimitFromHeaders(response);
-                
-                debouncedSave();
                 
                 // Handle rate limit
                 if (response.status === 429) {
@@ -1121,10 +1047,35 @@
     // STORAGE MANAGEMENT - Optimized
     // ============================================================================
     async function initializeStorageQuota() {
+        // Request persistent storage to prevent OS from silently evicting our data.
+        // Only request (and log) once — the result doesn't change between sessions,
+        // and on iOS Safari it always returns false (not supported), so we don't want
+        // to spam the log with a warning the user can't act on.
+        if (navigator.storage && navigator.storage.persist) {
+            try {
+                const alreadyChecked = localStorage.getItem('storagePersistChecked');
+                const granted = await navigator.storage.persist();
+                if (!alreadyChecked) {
+                    localStorage.setItem('storagePersistChecked', '1');
+                    if (granted) {
+                        addLog('Storage persistence granted ✓', 'info');
+                    } else {
+                        // Not granted is normal on iOS Safari — log quietly, just once
+                        addLog('Storage persistence unavailable on this browser (data protected by 4MB cap)', 'info');
+                    }
+                }
+                console.log(`Storage persistence: ${granted ? 'granted' : 'not granted'}`);
+            } catch (e) {
+                console.warn('Could not request storage persistence:', e);
+            }
+        }
+
         if ('storage' in navigator && 'estimate' in navigator.storage) {
             try {
                 const estimate = await navigator.storage.estimate();
                 const availableQuota = estimate.quota || state.storageQuota;
+                // Cap at 4MB - localStorage on mobile Safari is capped ~5MB regardless
+                // of what storage.estimate() reports (which reflects IndexedDB/Cache API quota).
                 state.storageQuota = Math.min(availableQuota * 0.8, CONFIG.MAX_SAFE_STORAGE);
                 console.log(`Storage quota: ${formatBytes(state.storageQuota)}`);
             } catch (error) {
@@ -1512,6 +1463,11 @@
     // ============================================================================
     // SERVICE WORKER
     // ============================================================================
+
+    // Flag to prevent the SW controllerchange event from triggering a second
+    // reload when updatePWA() already scheduled one via setTimeout.
+    let reloadPending = false;
+
     function registerServiceWorker() {
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('./sw.js')
@@ -1527,8 +1483,9 @@
                 })
                 .catch(error => console.error('SW registration failed:', error));
             
+            // Only reload if we haven't already scheduled one from updatePWA()
             navigator.serviceWorker.addEventListener('controllerchange', () => {
-                window.location.reload(true);
+                if (!reloadPending) window.location.reload(true);
             });
         }
     }
@@ -1548,14 +1505,6 @@
     function setupOnlineOfflineListeners() {
         window.addEventListener('online', handleOnlineStatus);
         window.addEventListener('offline', handleOnlineStatus);
-        
-        window.addEventListener('online', () => {
-            if (state.syncQueue.length > 0) {
-                showToast('Back online! Syncing...', { type: 'info' });
-                processSyncQueue();
-            }
-        });
-        
         handleOnlineStatus();
     }
 
@@ -1566,6 +1515,11 @@
         if (navigator.onLine) {
             banner && banner.classList.remove('active');
             if (refreshBtn) refreshBtn.disabled = false;
+            // Resume any pending sync jobs when connection is restored
+            if (state.syncQueue.length > 0) {
+                showToast('Back online! Syncing...', { type: 'info' });
+                processSyncQueue();
+            }
         } else {
             banner && banner.classList.add('active');
             if (refreshBtn) refreshBtn.disabled = true;
@@ -1634,6 +1588,8 @@
             navigator.serviceWorker.controller.postMessage({ type: 'SKIP_WAITING' });
         }
         
+        // Set flag so the controllerchange listener doesn't trigger a second reload
+        reloadPending = true;
         setTimeout(() => window.location.reload(true), CONFIG.RELOAD_DELAY);
     }
 
@@ -2206,6 +2162,12 @@
         const sub = input.value.trim().replace(/^r\//, '');
         if (!sub) return;
         
+        // Validate subreddit name: letters, numbers, underscores, 2-21 chars
+        if (!/^[a-zA-Z0-9_]{2,21}$/.test(sub)) {
+            showToast('Invalid subreddit name (2–21 letters, numbers or underscores)', { type: 'warning' });
+            return;
+        }
+        
         if (state.subreddits.some(s => s.toLowerCase() === sub.toLowerCase())) {
             showToast('Subreddit already added', { type: 'warning' });
             return;
@@ -2747,6 +2709,12 @@
     }
 
     window.addEventListener('beforeunload', () => {
+        // Flush any pending debounced save immediately before the page closes
+        if (saveTimeout) {
+            clearTimeout(saveTimeout);
+            saveTimeout = null;
+            saveState();
+        }
         Object.values(intervals).forEach(id => id && clearInterval(id));
     });
 

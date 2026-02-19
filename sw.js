@@ -1,8 +1,10 @@
 // Emergency News PWA Service Worker
-// VERSION: 74 - Bump this number when you update ANY file to trigger app updates
+// TO UPDATE: increment CACHE_VERSION below (e.g. 'v75' -> 'v76') whenever you change ANY file.
+// That is the only thing you need to change — old caches are cleaned up automatically.
 
-const CACHE_NAME = 'reddit-pwa-app-shell';
-const RUNTIME_CACHE = 'reddit-pwa-runtime';
+const CACHE_VERSION = 'v76';
+const CACHE_NAME = `reddit-pwa-app-shell-${CACHE_VERSION}`;
+const RUNTIME_CACHE = `reddit-pwa-runtime-${CACHE_VERSION}`;
 
 // Files to cache for offline functionality
 const APP_SHELL_FILES = [
@@ -36,11 +38,25 @@ self.addEventListener('install', event => {
 });
 
 // ============================================================================
-// ACTIVATE EVENT - Take control immediately
+// ACTIVATE EVENT - Take control immediately and clean up old version caches
 // ============================================================================
 self.addEventListener('activate', event => {
+    const currentCaches = [CACHE_NAME, RUNTIME_CACHE];
+
     event.waitUntil(
-        self.clients.claim()
+        caches.keys()
+            .then(cacheNames => {
+                // Delete any cache that does not belong to the current version
+                return Promise.all(
+                    cacheNames
+                        .filter(name => !currentCaches.includes(name))
+                        .map(name => {
+                            console.log(`[SW] Deleting stale cache: ${name}`);
+                            return caches.delete(name);
+                        })
+                );
+            })
+            .then(() => self.clients.claim())
     );
 });
 
