@@ -1,4 +1,4 @@
-# Emergency News PWA (ENP)
+# Emergency News PWA (ENPWA)
 
 A simple app that lets you read Reddit posts even when you don't have internet.
 
@@ -6,86 +6,111 @@ A simple app that lets you read Reddit posts even when you don't have internet.
 
 ENP saves Reddit posts on your phone so you can read them later without internet. This is useful for:
 
-- **Emergencies** - Access news and information during disasters when internet is down
-- **Remote areas** - Read posts in places with poor signal
-- **Saving data** - Load posts once, read them many times without using more data
+- **Emergencies** — Access news and information during disasters when internet is down
+- **Remote areas** — Read posts in places with poor signal
+- **Saving data** — Load posts once, read them many times without using more data
 
 ## How to use it
 
 ### Getting started
 
 1. Open the app in your web browser
-2. Pick your country from the list to get suggested news sources
-3. Or add your own favorite subreddits manually
+2. Pick your country from the list to get suggested subreddits, then tap **Add Defaults**
+3. Or skip the welcome screen and add your own subreddits manually
+4. Tap **Refresh Posts** to fetch your first batch of posts
 
 ### Reading posts
 
-- Posts save automatically when you're online
+- Posts are saved automatically when you refresh
 - You can read them anytime, even without internet
-- Click "Refresh Posts" when online to get new posts
+- Posts older than 30 days are automatically removed to save space
+- Tap the **★** icon on any post to star it — starred posts are kept indefinitely and never auto-deleted
 
-### Two feeds
+### Three feeds
 
-- **My Feed** - Shows posts from your chosen subreddits
-- **Popular** - Shows what's popular on Reddit right now
+- **My Feed** — Posts from your chosen subreddits
+- **Popular** — What's trending on Reddit right now
+- **Starred** — Posts you've saved with the ★ button
 
-Switch between them by tapping the tabs at the top.
+Switch between them using the tabs at the top of the screen.
 
-### Managing your subreddits
+### Filtering My Feed
 
-- **Add** - Type a subreddit name and click "Add Subreddit"
-- **Remove** - Click the × next to any subreddit in the list
-- **Export** - Save your subreddit list as a file (for backup)
-- **Import** - Load a previously saved list
+When you have multiple subreddits, a filter bar appears below the tabs. Tap any subreddit chip to show only posts from that community, or **All** to see everything together.
+
+### Managing subreddits
+
+- **Add** — Type a subreddit name in the settings panel and tap **Add Subreddit**
+- **Remove** — Tap the × next to any subreddit in the settings list
+- **Follow/Unfollow** — Tap a subreddit name on any post to open its info card, then tap Follow or Unfollow
+- **Block a subreddit** — Open its info card and tap **Block**. Blocked subreddits are hidden from your Popular feed
+- **Block a user** — Tap a username on any post to open the user card, then tap **Block User**. Their posts will be hidden across all feeds
+- Blocked subreddits and users are listed in the settings panel where you can remove them at any time
+
+### Backup and restore
+
+- **Export** — Saves your subreddits, blocked lists, starred posts, and theme preference to a `.json` file
+- **Import** — Loads a previously exported file and merges it with your current data without overwriting anything
+
+### Settings panel
+
+Open the settings panel by tapping the **☰** menu button in the top-left corner. From there you can:
+
+- Add or remove subreddits
+- View storage usage and post counts per subreddit
+- Toggle **Dark Mode**
+- Enable **Auto-Refresh on Start** — automatically fetches new posts every time you open the app (requires internet)
+- Enable **Refresh on Reload** — fetches new posts when you pull-to-refresh or reload the page
+- Export / Import your data
+- View the Activity Log showing recent sync events and storage operations
 
 ## Installing on your phone
 
 1. Open the app in your phone's browser
-2. Look for "Add to Home Screen" or "Install"
-3. Tap it to install the app
-4. Now it works like a regular app!
+2. Look for **Add to Home Screen** (Safari on iOS) or **Install App** (Chrome on Android)
+3. Tap it to install
+4. The app now works like a regular app, even fully offline
 
-## Tips
+> Works best on Chrome, Firefox, or Edge. Safari on iOS is supported but persistent storage is limited by the browser.
 
-- Add subreddits before you might lose internet (before trips, storms, etc.)
-- The app saves about 25 posts per subreddit
-- Works best on Chrome, Firefox, or Edge browsers
-- All your data stays on your phone - nothing is sent anywhere
+## Storage and data
+
+- The app stores up to approximately 4 MB of posts locally on your device
+- Each refresh fetches up to 25 posts per subreddit
+- Posts older than 30 days are automatically cleaned up
+- Starred posts are exempt from automatic cleanup and are kept until you remove them manually
+- If storage fills up, the oldest non-starred posts are removed automatically to make room
+- All data stays on your device — nothing is sent to any server
 
 ## Updates
 
-When there's a new version:
-- You'll see an "Update Now" button at the top
-- Click it to get the latest version
-- Your saved posts and subreddits won't be deleted
+When a new version is available, an **Update Now** banner appears at the top of the screen. Tap it to apply the update. Your posts, subreddits, and settings are not affected by updates.
 
 ## Privacy
 
-- Everything stays on your phone
-- No tracking or ads
+- Everything stays on your device
 - No account needed
+- No tracking, no ads
 - Works completely offline once set up
+
+---
 
 ## Important Disclaimer
 
 **This app is NOT an official emergency information source.**
 
-- Always follow official emergency alerts and instructions from authorities
+- Always follow official emergency alerts and instructions from local authorities
 - This app shows community discussions from Reddit, not verified emergency information
 - Do not rely on this app for critical safety decisions
-- Always check official government and emergency services websites for accurate information
-- In emergencies, call your local emergency services (911, 112, etc.)
+- In emergencies, call your local emergency number (911, 112, etc.)
+- Always check official government and emergency services for accurate information
 
-**No Warranty**: This app is provided "as is" without any guarantees. We are not responsible for:
-- Accuracy of information shown
-- Availability of the app during emergencies
-- Any decisions made based on content from this app
-- Loss of data or functionality
-
-This app is meant to help you stay informed about community discussions during emergencies, but should never replace official emergency information sources.
+**No Warranty**: This app is provided "as is" without any guarantees. We are not responsible for the accuracy of information shown, availability of the app during emergencies, any decisions made based on content from this app, or loss of data or functionality.
 
 ---
 
-**Made for emergencies. Works when you need it most.**
-
 **Use responsibly. Always verify critical information with official sources.**
+
+---
+
+[GitHub](https://github.com/h2oforlife/enpwa)
