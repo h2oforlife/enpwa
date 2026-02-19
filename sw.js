@@ -2,7 +2,7 @@
 // TO UPDATE: increment CACHE_VERSION below (e.g. 'v75' -> 'v76') whenever you change ANY file.
 // That is the only thing you need to change — old caches are cleaned up automatically.
 
-const CACHE_VERSION = 'v76';
+const CACHE_VERSION = 'v77';
 const CACHE_NAME = `reddit-pwa-app-shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `reddit-pwa-runtime-${CACHE_VERSION}`;
 

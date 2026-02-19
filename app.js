@@ -283,23 +283,45 @@
 
         try {
             localStorage.setItem('appState', JSON.stringify(toSave));
-            
-            // Proactive cleanup if approaching limit (85%)
+
+            // Proactive cleanup if approaching limit (85%), but only if cleanup
+            // isn't already running (which would mean we're inside a cleanup→save cycle).
             const percent = getStorageUsagePercent();
-            if (percent >= 85) {
+            if (percent >= 85 && !cleanupOldPosts.running) {
                 console.log(`Storage at ${percent.toFixed(1)}% - triggering proactive cleanup`);
                 cleanupOldPosts();
+                // Save again now that posts have been trimmed from memory
+                localStorage.setItem('appState', JSON.stringify(toSave));
             }
-            
+
             return true;
         } catch (error) {
             console.error('Error saving state:', error);
             if (error.name === 'QuotaExceededError') {
                 addLog('Storage full - cleaning up old posts', 'warning');
                 cleanupOldPosts();
-                // Try again after cleanup - toSave is in scope here now
+                // Rebuild toSave after cleanup so it reflects the trimmed arrays,
+                // then attempt the save again
                 try {
-                    localStorage.setItem('appState', JSON.stringify(toSave));
+                    const trimmedSave = {
+                        cachedPosts: state.feeds.my.posts,
+                        popularPosts: state.feeds.popular.posts,
+                        bookmarkedPosts: state.feeds.starred.posts,
+                        subreddits: state.subreddits,
+                        blockedSubreddits: state.blocked,
+                        blockedUsers: state.blockedUsers,
+                        currentFeed: state.current,
+                        syncQueue: state.syncQueue,
+                        myPending: state.feeds.my.pending,
+                        popularPending: state.feeds.popular.pending,
+                        myLastFetch: state.feeds.my.lastFetch,
+                        popularLastFetch: state.feeds.popular.lastFetch,
+                        updateAvailable: state.updateAvailable,
+                        logs: state.logs,
+                        autoRefreshOnStart: state.autoRefreshOnStart,
+                        refreshOnPageReload: state.refreshOnPageReload
+                    };
+                    localStorage.setItem('appState', JSON.stringify(trimmedSave));
                     return true;
                 } catch (e) {
                     addLog('Unable to free enough storage space', 'error');
@@ -1111,57 +1133,75 @@
             return;
         }
         cleanupOldPosts.running = true;
-        
-        const percent = getStorageUsagePercent();
-        const targetPercent = 80; // Target 80% to keep more posts with safe buffer
-        
-        console.log(`Storage at ${percent.toFixed(1)}% - cleaning up to ${targetPercent}%`);
-        
-        const bookmarkedIds = new Set(state.feeds.starred.posts.map(p => p.id));
-        
-        // Calculate actual average post size
+
         const currentSize = getLocalStorageSize();
-        const totalPosts = state.feeds.my.posts.length + state.feeds.popular.posts.length;
-        const avgPostSize = totalPosts > 0 ? currentSize / totalPosts : 2048;
-        
+        const percent = (currentSize / state.storageQuota) * 100;
+        const targetPercent = 70; // Target 70% to give a healthy buffer after cleanup
+
+        console.log(`Storage at ${percent.toFixed(1)}% - cleaning up to ${targetPercent}%`);
+
+        const bookmarkedIds = new Set(state.feeds.starred.posts.map(p => p.id));
+
+        // Calculate average post size using only the post arrays, not total localStorage.
+        // Total localStorage includes settings/logs/queue which would inflate the estimate.
+        const allPostsArr = [...state.feeds.my.posts, ...state.feeds.popular.posts];
+        const totalPosts = allPostsArr.length;
+
+        if (totalPosts === 0) {
+            console.log('No posts to clean up');
+            cleanupOldPosts.running = false;
+            return;
+        }
+
+        // Estimate post data size by serialising just the posts portion
+        const postsJsonSize = JSON.stringify({
+            cachedPosts: state.feeds.my.posts,
+            popularPosts: state.feeds.popular.posts
+        }).length * 2; // *2 for UTF-16 encoding
+        const avgPostSize = postsJsonSize / totalPosts;
+
         const targetSize = (state.storageQuota * targetPercent) / 100;
         const bytesToRemove = currentSize - targetSize;
-        
+
         if (bytesToRemove <= 0) {
             console.log('No cleanup needed');
             cleanupOldPosts.running = false;
             return;
         }
-        
-        // Calculate posts to remove, add 10% buffer to ensure we hit target
-        const postsToRemove = Math.ceil((bytesToRemove / avgPostSize) * 1.1);
-        
+
+        // Calculate posts to remove, add 20% buffer to ensure we actually hit the target
+        const postsToRemove = Math.ceil((bytesToRemove / avgPostSize) * 1.2);
+
         console.log(`Need to remove ${formatBytes(bytesToRemove)}, estimated ${postsToRemove} posts (avg ${formatBytes(avgPostSize)}/post)`);
-        
-        // Remove oldest non-bookmarked posts (posts are sorted newest first)
+
+        // Remove oldest non-starred posts first
         const removedIds = new Set();
-        const allPosts = [...state.feeds.my.posts, ...state.feeds.popular.posts]
-            .sort((a, b) => a.created_utc - b.created_utc); // Oldest first
-        
-        for (let post of allPosts) {
+        const sorted = [...allPostsArr].sort((a, b) => a.created_utc - b.created_utc); // oldest first
+
+        for (const post of sorted) {
             if (removedIds.size >= postsToRemove) break;
             if (!bookmarkedIds.has(post.id)) {
                 removedIds.add(post.id);
             }
         }
-        
-        const beforeCount = state.feeds.my.posts.length + state.feeds.popular.posts.length;
+
+        const beforeCount = totalPosts;
         state.feeds.my.posts = state.feeds.my.posts.filter(p => !removedIds.has(p.id));
         state.feeds.popular.posts = state.feeds.popular.posts.filter(p => !removedIds.has(p.id));
         rebuildPopularFiltered();
-        
-        // Don't call saveState() here to avoid recursion - let caller handle it
-        
-        const afterPercent = getStorageUsagePercent();
+
         const afterCount = state.feeds.my.posts.length + state.feeds.popular.posts.length;
-        console.log(`Cleaned up: ${beforeCount - afterCount} posts removed. Storage: ${percent.toFixed(1)}% → ${afterPercent.toFixed(1)}%`);
-        addLog(`Storage cleanup: ${beforeCount - afterCount} posts removed (${percent.toFixed(0)}% → ${afterPercent.toFixed(0)}%)`, 'info');
-        
+        const removedCount = beforeCount - afterCount;
+
+        // Estimate afterPercent from in-memory state, since localStorage hasn't been
+        // written yet (saveState is intentionally deferred to avoid recursion).
+        // We subtract the estimated size of the removed posts from currentSize.
+        const estimatedAfterSize = Math.max(0, currentSize - (removedCount * avgPostSize));
+        const afterPercent = (estimatedAfterSize / state.storageQuota) * 100;
+
+        console.log(`Cleaned up: ${removedCount} posts removed. Storage: ${percent.toFixed(1)}% → ~${afterPercent.toFixed(1)}%`);
+        addLog(`Storage cleanup: ${removedCount} posts removed (${percent.toFixed(0)}% → ~${afterPercent.toFixed(0)}%)`, 'info');
+
         cleanupOldPosts.running = false;
     }
 
